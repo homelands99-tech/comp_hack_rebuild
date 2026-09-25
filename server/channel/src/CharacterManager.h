@@ -1220,6 +1220,29 @@ class CharacterManager {
                      std::set<uint32_t> updates = {});
 
   /**
+   * Get how many more of an item the character's material tank can hold.
+   * @param character Pointer to the character
+   * @param itemType Item type to check
+   * @return Free space for the item, 0 if the character has no material
+   *  tank or the item cannot be stored in it
+   */
+  uint32_t GetMaterialTankSpace(
+      const std::shared_ptr<objects::Character>& character, uint32_t itemType);
+
+  /**
+   * Store as much as possible of the given items in the character's material
+   * tank. The client is sent the updated tank contents and a chat message.
+   * The caller must add whatever is left in the items map elsewhere.
+   * @param client Pointer to the client connection
+   * @param items Map of item types to counts. The amounts stored in the
+   *  tank are removed from it.
+   * @return Map of item types to the counts stored in the tank
+   */
+  std::unordered_map<uint32_t, uint32_t> StoreInMaterialTank(
+      const std::shared_ptr<ChannelClientConnection>& client,
+      std::unordered_map<uint32_t, uint32_t>& items);
+
+  /**
    * Send the client character's demonic compendium list
    * @param client Pointer to the client connection
    */

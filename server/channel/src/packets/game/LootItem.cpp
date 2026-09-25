@@ -32,6 +32,7 @@
 #include <Packet.h>
 #include <PacketCodes.h>
 #include <Randomizer.h>
+#include <ServerConstants.h>
 
 // libhack Includes
 #include <Log.h>
@@ -83,6 +84,7 @@ bool Parsers::LootItem::Parse(
   uint32_t demonType = 0;
   std::list<int8_t> lootedSlots;
   std::unordered_map<uint32_t, uint32_t> lootedItems;
+  std::unordered_map<uint32_t, uint32_t> tankedItems;
 
   // We will only use a distance check here, because the Auto-Loot function can
   // go through walls.
@@ -127,6 +129,39 @@ bool Parsers::LootItem::Parse(
     } else {
       // Item box
       auto inventory = character->GetItemBoxes(0).Get();
+
+      // Automatic material tank storage (AUTO_MATERIAL_TANK constant): loot
+      // that fits in the material tank completely is taken straight into it,
+      // so it does not need any free inventory slots.
+      if (SVR_CONST.AUTO_MATERIAL_TANK) {
+        std::set<int8_t> tankSlots;
+        std::unordered_map<uint32_t, uint32_t> reserved;
+        auto loot = lBox->GetLoot();
+        for (size_t i = 0; i < lBox->LootCount(); i++) {
+          auto l = loot[i];
+          if (!l || l->GetCount() == 0 || (slotID != -1 && slotID != (int8_t)i)) {
+            continue;
+          }
+
+          uint32_t itemType = l->GetType();
+          uint32_t space =
+              characterManager->GetMaterialTankSpace(character, itemType);
+          uint32_t needed = reserved[itemType] + (uint32_t)l->GetCount();
+          if (space >= needed) {
+            reserved[itemType] = needed;
+            tankSlots.insert((int8_t)i);
+          }
+        }
+
+        if (!tankSlots.empty()) {
+          auto lootMap = zone->TakeLoot(lBox, tankSlots, tankSlots.size());
+          for (auto lPair : lootMap) {
+            lootedSlots.push_back((int8_t)lPair.first);
+            tankedItems[lPair.second->GetType()] +=
+                (uint32_t)lPair.second->GetCount();
+          }
+        }
+      }
 
       size_t freeSlots = 0;
       std::unordered_map<uint32_t, uint16_t> stacksFree;
@@ -189,6 +224,18 @@ bool Parsers::LootItem::Parse(
 
     client->QueuePacket(reply);
     characterManager->SendLootItemData(zConnections, lState, true);
+
+    if (SVR_CONST.AUTO_MATERIAL_TANK) {
+      // Loot taken for the tank goes in first; anything that no longer fits
+      // (the tank changed in the meantime) goes to the inventory instead.
+      characterManager->StoreInMaterialTank(client, tankedItems);
+      for (auto& pair : tankedItems) {
+        lootedItems[pair.first] += pair.second;
+      }
+
+      // Put as much of the other looted materials in the tank as fits.
+      characterManager->StoreInMaterialTank(client, lootedItems);
+    }
 
     if (lootedItems.size() > 0) {
       characterManager->AddRemoveItems(client, lootedItems, true);

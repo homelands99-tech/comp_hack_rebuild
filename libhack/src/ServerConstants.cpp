@@ -307,6 +307,13 @@ bool ServerConstants::Initialize(const String& filePath) {
   success &= LoadInteger(constants["VALUABLE_MATERIAL_TANK"],
                          sConstants.VALUABLE_MATERIAL_TANK);
 
+  // Optional: automatically store looted materials in the material tank.
+  sConstants.AUTO_MATERIAL_TANK = 0;
+  if (constants.find("AUTO_MATERIAL_TANK") != constants.end()) {
+    success &= LoadInteger(constants["AUTO_MATERIAL_TANK"],
+                           sConstants.AUTO_MATERIAL_TANK);
+  }
+
   // Load other constants
   success &= LoadInteger(constants["DIGITALIZE_COOLDOWN"],
                          sConstants.DIGITALIZE_COOLDOWN);
