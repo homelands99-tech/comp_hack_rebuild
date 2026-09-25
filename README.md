@@ -48,7 +48,7 @@ with `windows_build.bat all`.*
 ### 手順 ###
 
 ```bat
-git clone <このリポジトリのURL> comp_hack
+git clone https://github.com/homelands99-tech/comp_hack_rebuild.git comp_hack
 cd comp_hack
 git submodule update --init
 windows_build.bat all
