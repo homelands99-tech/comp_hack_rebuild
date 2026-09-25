@@ -373,6 +373,35 @@ class CharacterManager {
                        const std::list<uint16_t>& slots,
                        bool adjustCounts = true);
 
+  /// Number of inventory pages a character can switch between. Page 1 is
+  /// stored in inventory box 0 at first; the other pages are kept in the
+  /// character's unused inventory boxes 1-4, whose BoxID records which page
+  /// they hold. The visible inventory (box 0) always holds the current page.
+  static const uint8_t INVENTORY_PAGE_COUNT = 5;
+
+  /**
+   * Get the current inventory page and how many items each page holds.
+   * Creates the storage for the extra pages on first use.
+   * @param client Pointer to the client connection
+   * @param counts Output list of item counts, one per page (page 1 first)
+   * @return Current page number (1 to INVENTORY_PAGE_COUNT) or 0 on failure
+   */
+  uint8_t GetInventoryPages(
+      const std::shared_ptr<ChannelClientConnection>& client,
+      std::vector<uint8_t>& counts);
+
+  /**
+   * Switch the visible inventory to another page. Equipped items stay in
+   * the visible inventory. Nothing changes if the switch is not possible.
+   * @param client Pointer to the client connection
+   * @param page Page number to switch to (1 to INVENTORY_PAGE_COUNT)
+   * @param error Output message explaining why the switch failed
+   * @return true if the page was switched
+   */
+  bool SwitchInventoryPage(
+      const std::shared_ptr<ChannelClientConnection>& client, uint8_t page,
+      libcomp::String& error);
+
   /**
    * Get all items in the specified box that match the supplied
    * itemID.

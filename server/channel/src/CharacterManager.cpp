@@ -38,6 +38,8 @@
 // Standard C++11 Includes
 #include <math.h>
 
+#include <unordered_set>
+
 #include <limits>
 
 // object Includes
@@ -1782,6 +1784,271 @@ void CharacterManager::SendItemBoxData(
           client, objects::DemonQuest::Type_t::ITEM);
     }
   }
+}
+
+/**
+ * Create the storage boxes for the extra inventory pages if they do not exist
+ * yet (inventory boxes 1 to INVENTORY_PAGE_COUNT - 1).
+ * @param character Character to create the boxes for
+ * @param dbChanges Database changes to add the new boxes to
+ * @return true if any box was created
+ */
+static bool CreateInventoryPageBoxes(
+    const std::shared_ptr<objects::Character>& character,
+    const std::shared_ptr<libcomp::DatabaseChangeSet>& dbChanges) {
+  bool created = false;
+
+  for (size_t i = 1; i < CharacterManager::INVENTORY_PAGE_COUNT; i++) {
+    if (character->GetItemBoxes(i).Get()) {
+      continue;
+    }
+
+    auto box = libcomp::PersistentObject::New<objects::ItemBox>(true);
+    box->SetType(objects::ItemBox::Type_t::INVENTORY);
+    box->SetBoxID((int64_t)(i + 1));  // Page number stored in this box
+    box->SetAccount(character->GetAccount());
+    box->SetCharacter(character->GetUUID());
+
+    character->SetItemBoxes(i, box);
+    dbChanges->Insert(box);
+    created = true;
+  }
+
+  if (created) {
+    dbChanges->Update(character);
+  }
+
+  return created;
+}
+
+/**
+ * Work out which page the visible inventory holds: the one page number that
+ * is not stored in any of the page boxes.
+ * @param character Character with all page boxes created
+ * @return Current page number or 0 if the page boxes are inconsistent
+ */
+static uint8_t GetCurrentInventoryPage(
+    const std::shared_ptr<objects::Character>& character) {
+  std::set<int64_t> stored;
+  for (size_t i = 1; i < CharacterManager::INVENTORY_PAGE_COUNT; i++) {
+    auto box = character->GetItemBoxes(i).Get();
+    if (!box) {
+      return 0;
+    }
+
+    stored.insert(box->GetBoxID());
+  }
+
+  uint8_t current = 0;
+  for (uint8_t page = 1; page <= CharacterManager::INVENTORY_PAGE_COUNT;
+       page++) {
+    if (stored.find(page) == stored.end()) {
+      if (current) {
+        return 0;  // More than one page missing
+      }
+
+      current = page;
+    }
+  }
+
+  return current;
+}
+
+uint8_t CharacterManager::GetInventoryPages(
+    const std::shared_ptr<ChannelClientConnection>& client,
+    std::vector<uint8_t>& counts) {
+  auto state = client->GetClientState();
+  auto character = state->GetCharacterState()->GetEntity();
+  auto inventory = character ? character->GetItemBoxes(0).Get() : nullptr;
+  if (!inventory) {
+    return 0;
+  }
+
+  auto dbChanges = libcomp::DatabaseChangeSet::Create(state->GetAccountUID());
+  if (CreateInventoryPageBoxes(character, dbChanges)) {
+    mServer.lock()->GetWorldDatabase()->QueueChangeSet(dbChanges);
+  }
+
+  uint8_t current = GetCurrentInventoryPage(character);
+  if (!current) {
+    return 0;
+  }
+
+  counts.assign(INVENTORY_PAGE_COUNT, 0);
+  for (size_t i = 0; i < INVENTORY_PAGE_COUNT; i++) {
+    auto box = character->GetItemBoxes(i).Get();
+    uint8_t page = i == 0 ? current : (uint8_t)box->GetBoxID();
+
+    uint8_t count = 0;
+    for (auto item : box->GetItems()) {
+      if (!item.IsNull()) {
+        count++;
+      }
+    }
+
+    counts[(size_t)(page - 1)] = count;
+  }
+
+  return current;
+}
+
+bool CharacterManager::SwitchInventoryPage(
+    const std::shared_ptr<ChannelClientConnection>& client, uint8_t page,
+    libcomp::String& error) {
+  auto state = client->GetClientState();
+  auto character = state->GetCharacterState()->GetEntity();
+  auto inventory = character ? character->GetItemBoxes(0).Get() : nullptr;
+  if (!inventory) {
+    error = "インベントリが見つかりません。";
+    return false;
+  }
+
+  if (page < 1 || page > INVENTORY_PAGE_COUNT) {
+    error = libcomp::String("ページは 1 から %1 で指定してください。")
+                .Arg(INVENTORY_PAGE_COUNT);
+    return false;
+  }
+
+  // Moving items around during a trade or similar would break it.
+  if (state->GetExchangeSession()) {
+    error = "取引中はページを切り替えられません。";
+    return false;
+  }
+
+  auto dbChanges = libcomp::DatabaseChangeSet::Create(state->GetAccountUID());
+  CreateInventoryPageBoxes(character, dbChanges);
+
+  uint8_t current = GetCurrentInventoryPage(character);
+  if (!current) {
+    error = "ページの情報が壊れています。管理者に連絡してください。";
+    return false;
+  }
+
+  if (page == current) {
+    error = libcomp::String("すでにページ %1 です。").Arg(page);
+    return false;
+  }
+
+  std::shared_ptr<objects::ItemBox> pageBox;
+  for (size_t i = 1; i < INVENTORY_PAGE_COUNT; i++) {
+    auto box = character->GetItemBoxes(i).Get();
+    if (box->GetBoxID() == (int64_t)page) {
+      pageBox = box;
+      break;
+    }
+  }
+
+  // Equipped items stay in the visible inventory.
+  std::unordered_set<libobjgen::UUID> equipped;
+  for (auto equip : character->GetEquippedItems()) {
+    if (!equip.IsNull()) {
+      equipped.insert(equip.GetUUID());
+    }
+  }
+
+  const size_t slotCount = inventory->ItemsCount();
+
+  std::vector<std::shared_ptr<objects::Item>> outgoing(slotCount);
+  std::vector<std::shared_ptr<objects::Item>> staying(slotCount);
+  size_t stayingCount = 0;
+  for (size_t slot = 0; slot < slotCount; slot++) {
+    auto item = inventory->GetItems(slot).Get();
+    if (!item) {
+      continue;
+    }
+
+    if (equipped.find(item->GetUUID()) != equipped.end()) {
+      staying[slot] = item;
+      stayingCount++;
+    } else {
+      outgoing[slot] = item;
+    }
+  }
+
+  std::list<std::pair<size_t, std::shared_ptr<objects::Item>>> incoming;
+  for (size_t slot = 0; slot < slotCount; slot++) {
+    auto item = pageBox->GetItems(slot).Get();
+    if (item) {
+      incoming.push_back(std::make_pair(slot, item));
+    }
+  }
+
+  if (incoming.size() + stayingCount > slotCount) {
+    error = libcomp::String(
+                "装備中のアイテムがあるため、ページ %1 のアイテムが入りきりません。"
+                "装備を外すか、ページ %1 のアイテムを減らしてください。")
+                .Arg(page);
+    return false;
+  }
+
+  // New visible inventory: equipped items keep their slots, the page's items
+  // keep theirs where possible and fill the first free slots otherwise.
+  std::vector<std::shared_ptr<objects::Item>> newInventory = staying;
+  std::list<std::shared_ptr<objects::Item>> displaced;
+  for (auto& pair : incoming) {
+    if (!newInventory[pair.first]) {
+      newInventory[pair.first] = pair.second;
+    } else {
+      displaced.push_back(pair.second);
+    }
+  }
+
+  size_t freeSlot = 0;
+  for (auto& item : displaced) {
+    while (newInventory[freeSlot]) {
+      freeSlot++;
+    }
+
+    newInventory[freeSlot] = item;
+  }
+
+  // Apply the new contents to both boxes.
+  for (size_t slot = 0; slot < slotCount; slot++) {
+    auto item = newInventory[slot];
+    inventory->SetItems(slot, item);
+    if (item && (item->GetItemBox() != inventory->GetUUID() ||
+                 item->GetBoxSlot() != (int8_t)slot)) {
+      item->SetItemBox(inventory->GetUUID());
+      item->SetBoxSlot((int8_t)slot);
+      dbChanges->Update(item);
+    }
+
+    item = outgoing[slot];
+    pageBox->SetItems(slot, item);
+    if (item) {
+      item->SetItemBox(pageBox->GetUUID());
+      item->SetBoxSlot((int8_t)slot);
+      dbChanges->Update(item);
+    }
+  }
+
+  // The page box now holds the page that was visible until now.
+  pageBox->SetBoxID((int64_t)current);
+
+  dbChanges->Update(inventory);
+  dbChanges->Update(pageBox);
+
+  auto server = mServer.lock();
+  server->GetWorldDatabase()->QueueChangeSet(dbChanges);
+
+  // Send every slot as an update (in two halves so the packets stay in update
+  // mode) so the client also clears the slots that are now empty.
+  std::list<uint16_t> firstHalf, secondHalf;
+  for (uint16_t slot = 0; slot < (uint16_t)slotCount; slot++) {
+    (slot < slotCount / 2 ? firstHalf : secondHalf).push_back(slot);
+  }
+
+  SendItemBoxData(client, inventory, firstHalf, false);
+  SendItemBoxData(client, inventory, secondHalf, false);
+
+  // Item counts for demon quests may have changed.
+  auto dQuest = character->GetDemonQuest().Get();
+  if (dQuest && dQuest->GetType() == objects::DemonQuest::Type_t::ITEM) {
+    server->GetEventManager()->UpdateDemonQuestCount(
+        client, objects::DemonQuest::Type_t::ITEM);
+  }
+
+  return true;
 }
 
 std::list<std::shared_ptr<objects::Item>> CharacterManager::GetExistingItems(

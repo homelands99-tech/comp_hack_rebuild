@@ -95,6 +95,7 @@ ChatManager::ChatManager(const std::weak_ptr<ChannelServer>& server)
     : mServer(server) {
   mGMands["cp"] = &ChatManager::GMCommand_AddRemoveCP;
   mGMands["announce"] = &ChatManager::GMCommand_Announce;
+  mGMands["bag"] = &ChatManager::GMCommand_Bag;
   mGMands["ban"] = &ChatManager::GMCommand_Ban;
   mGMands["bethel"] = &ChatManager::GMCommand_Bethel;
   mGMands["bp"] = &ChatManager::GMCommand_BattlePoints;
@@ -2008,6 +2009,10 @@ bool ChatManager::GMCommand_Help(
         "postings belonging to the account related to the current",
         "channel will be immediately closed.",
         "The command can be used repeatedly for multi-channel setups."}},
+      {"bag",
+       {"@bag [PAGE]",
+        "Show the inventory pages, or switch the visible inventory",
+        "to PAGE (1-5). Equipped items stay in the inventory."}},
       {"bethel",
        {"@bethel INDEX AMOUNT",
         "Set the current character's bethel AMOUNT corresponding",
@@ -3889,6 +3894,54 @@ bool ChatManager::GMCommand_Valuable(
   }
 
   return true;
+}
+
+bool ChatManager::GMCommand_Bag(
+    const std::shared_ptr<channel::ChannelClientConnection>& client,
+    const std::list<libcomp::String>& args) {
+  auto server = mServer.lock();
+  auto characterManager = server->GetCharacterManager();
+
+  std::list<libcomp::String> argsCopy = args;
+  uint8_t page = 0;
+
+  if (!argsCopy.empty() && !GetIntegerArg<uint8_t>(page, argsCopy)) {
+    return SendChatMessage(client, ChatType_t::CHAT_SELF,
+                           "使い方: @bag または @bag ページ番号(1-5)");
+  }
+
+  if (page) {
+    libcomp::String error;
+    if (!characterManager->SwitchInventoryPage(client, page, error)) {
+      return SendChatMessage(client, ChatType_t::CHAT_SELF, error);
+    }
+  }
+
+  std::vector<uint8_t> counts;
+  uint8_t current = characterManager->GetInventoryPages(client, counts);
+  if (!current) {
+    return SendChatMessage(client, ChatType_t::CHAT_SELF,
+                           "インベントリのページ情報を取得できません。");
+  }
+
+  libcomp::String summary;
+  for (size_t i = 0; i < counts.size(); i++) {
+    summary += libcomp::String("%1%2:%3/50 ")
+                   .Arg(i + 1 == current ? "*" : "")
+                   .Arg((uint32_t)(i + 1))
+                   .Arg((uint32_t)counts[i]);
+  }
+
+  if (page) {
+    SendChatMessage(client, ChatType_t::CHAT_SELF,
+                    libcomp::String("ページ %1 に切り替えました。").Arg(page));
+  } else {
+    SendChatMessage(client, ChatType_t::CHAT_SELF,
+                    libcomp::String("現在のページ: %1 (切り替え: @bag 番号)")
+                        .Arg(current));
+  }
+
+  return SendChatMessage(client, ChatType_t::CHAT_SELF, summary.RightTrimmed());
 }
 
 bool ChatManager::GMCommand_Version(
