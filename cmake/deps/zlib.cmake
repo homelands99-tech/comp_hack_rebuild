@@ -61,6 +61,13 @@ ELSE(ZLIB_FOUND)
     MESSAGE("-- Building external zlib")
 
     IF(EXISTS "${CMAKE_SOURCE_DIR}/deps/zlib.zip")
+        # Needed so dependents (physfs) link this zlib instead of building
+        # their own copy (which clashes with the one in MariaDB).
+        IF(WIN32)
+            SET(ZLIB_LIBRARY "${CMAKE_CURRENT_BINARY_DIR}/zlib/lib/zlibstatic_reldeb.lib")
+        ELSE()
+            SET(ZLIB_LIBRARY "${CMAKE_CURRENT_BINARY_DIR}/zlib/lib/libz.a")
+        ENDIF()
         SET(ZLIB_URL
             URL "${CMAKE_SOURCE_DIR}/deps/zlib.zip"
         )
