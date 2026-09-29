@@ -2012,7 +2012,8 @@ bool ChatManager::GMCommand_Help(
       {"bag",
        {"@bag [PAGE]",
         "Show the inventory pages, or switch the visible inventory",
-        "to PAGE (1-5). Equipped items stay in the inventory."}},
+        "to PAGE (1-5). Equipped items and currency (macca,",
+        "magnetite) stay in the inventory."}},
       {"bethel",
        {"@bethel INDEX AMOUNT",
         "Set the current character's bethel AMOUNT corresponding",
@@ -3914,6 +3915,11 @@ bool ChatManager::GMCommand_Bag(
     libcomp::String error;
     if (!characterManager->SwitchInventoryPage(client, page, error)) {
       return SendChatMessage(client, ChatType_t::CHAT_SELF, error);
+    }
+
+    if (!error.IsEmpty()) {
+      // Notice about the switch (e.g. currency that could not be moved)
+      SendChatMessage(client, ChatType_t::CHAT_SELF, error);
     }
   }
 

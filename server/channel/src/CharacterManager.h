@@ -381,7 +381,8 @@ class CharacterManager {
 
   /**
    * Get the current inventory page and how many items each page holds.
-   * Creates the storage for the extra pages on first use.
+   * Creates the storage for the extra pages on first use and moves currency
+   * left on other pages into the visible inventory (sending the changes).
    * @param client Pointer to the client connection
    * @param counts Output list of item counts, one per page (page 1 first)
    * @return Current page number (1 to INVENTORY_PAGE_COUNT) or 0 on failure
@@ -391,11 +392,14 @@ class CharacterManager {
       std::vector<uint8_t>& counts);
 
   /**
-   * Switch the visible inventory to another page. Equipped items stay in
-   * the visible inventory. Nothing changes if the switch is not possible.
+   * Switch the visible inventory to another page. Equipped items and
+   * currency (macca, magnetite and their compressed items) stay in the
+   * visible inventory, and currency on other pages is moved into it. Nothing
+   * changes if the switch is not possible.
    * @param client Pointer to the client connection
    * @param page Page number to switch to (1 to INVENTORY_PAGE_COUNT)
-   * @param error Output message explaining why the switch failed
+   * @param error Output message explaining why the switch failed, or a
+   *  notice for the player when it worked (may be empty)
    * @return true if the page was switched
    */
   bool SwitchInventoryPage(
