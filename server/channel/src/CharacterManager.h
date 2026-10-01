@@ -787,7 +787,8 @@ class CharacterManager {
    * @param groupIdx Reunion group index (0-11, Tiwaz to Wyrd)
    * @param count Ranks to raise, 0 for as many as can be paid or -1 to only
    *  show the current rank and how many ranks can be paid
-   * @return Ranks raised, 0 if nothing was raised or -1 on an error
+   * @return Ranks raised (with -1 as count: ranks that can be paid), 0 if
+   *  nothing was raised or -1 on an error
    */
   int32_t ReunionBulk(const std::shared_ptr<CharacterState>& cState,
                       int8_t groupIdx, int32_t count);

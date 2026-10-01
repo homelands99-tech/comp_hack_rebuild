@@ -3876,7 +3876,7 @@ int32_t CharacterManager::ReunionBulk(
 
   if (count < 0) {
     report();
-    return 0;
+    return possible;
   }
 
   int32_t raise = count == 0 ? possible : count;
