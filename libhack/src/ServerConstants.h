@@ -469,6 +469,10 @@ class ServerConstants {
     /// there automatically (1 = on, 0 = off). Optional, defaults to off.
     uint8_t AUTO_MATERIAL_TANK;
 
+    /// Maximum number of demon force items consumed by one use (0 = off,
+    /// the client only ever uses one). Optional, defaults to off.
+    uint16_t DEMON_FORCE_BULK;
+
     /// Default zone to move players when no other zone is found
     uint32_t ZONE_DEFAULT;
 

@@ -27,6 +27,7 @@
 #include "ChatManager.h"
 
 // libcomp Includes
+#include <Constants.h>
 #include <DefinitionManager.h>
 #include <Git.h>
 #include <Log.h>
@@ -110,6 +111,7 @@ ChatManager::ChatManager(const std::weak_ptr<ChannelServer>& server)
   mGMands["effect"] = &ChatManager::GMCommand_Effect;
   mGMands["enchant"] = &ChatManager::GMCommand_Enchant;
   mGMands["enemy"] = &ChatManager::GMCommand_Enemy;
+  mGMands["force"] = &ChatManager::GMCommand_Force;
   mGMands["event"] = &ChatManager::GMCommand_Event;
   mGMands["expertise"] = &ChatManager::GMCommand_ExpertiseSet;
   mGMands["expertisemax"] = &ChatManager::GMCommand_ExpertiseExtend;
@@ -439,8 +441,13 @@ bool ChatManager::HandleGMand(
     libcomp::String sentFrom =
         state->GetCharacterState()->GetEntity()->GetName();
 
-    if (state->GetUserLevel() == 0 && "@version" != message &&
-        "@license" != message) {
+    // @force is open to all players while DEMON_FORCE_BULK is on
+    libcomp::String commandName(match[1]);
+    bool playerCommand =
+        "@version" == message || "@license" == message ||
+        (SVR_CONST.DEMON_FORCE_BULK > 1 && commandName.ToLower() == "force");
+
+    if (state->GetUserLevel() == 0 && !playerCommand) {
       // Don't process the message but don't fail
       LogChatManagerInfo([&]() {
         return libcomp::String(
@@ -1036,6 +1043,108 @@ bool ChatManager::GMCommand_Crash(
   (void)args;
 
   abort();
+}
+
+bool ChatManager::GMCommand_Force(
+    const std::shared_ptr<channel::ChannelClientConnection>& client,
+    const std::list<libcomp::String>& args) {
+  // Open to players (see the user level check in HandleGMand)
+  static const char* const FORCE_NAMES[20] = {
+      "HP最大", "MP最大",  "力",       "魔",     "体",
+      "知",     "速",      "運",       "HP回復", "MP回復",
+      "近接",   "遠隔",    "魔法",     "支援",   "クリティカル",
+      "物理防御", "魔法防御", "クリ防御", "経験値", "状態異常耐性"};
+
+  auto server = mServer.lock();
+  auto definitionManager = server->GetDefinitionManager();
+  auto state = client->GetClientState();
+  uint16_t bulkMax = SVR_CONST.DEMON_FORCE_BULK;
+
+  std::list<libcomp::String> argsCopy = args;
+  if (!argsCopy.empty()) {
+    if (bulkMax <= 1) {
+      return SendChatMessage(client, ChatType_t::CHAT_SELF,
+                             "まとめ使いは無効です（DEMON_FORCE_BULK）");
+    }
+
+    libcomp::String value = argsCopy.front().ToLower();
+    uint16_t count = 0;
+    if (value != "max" &&
+        (!GetIntegerArg<uint16_t>(count, argsCopy) || count < 1)) {
+      return SendChatMessage(
+          client, ChatType_t::CHAT_SELF,
+          libcomp::String("使い方: @force 個数（1〜%1）または @force max")
+              .Arg(bulkMax));
+    }
+
+    if (count > bulkMax) {
+      count = bulkMax;
+    }
+
+    state->SetDemonForceBulk(count);
+  }
+
+  if (bulkMax > 1) {
+    uint16_t current = state->GetDemonForceBulk();
+    SendChatMessage(
+        client, ChatType_t::CHAT_SELF,
+        libcomp::String("まとめ使い: 1回で最大%1個（上限%2、"
+                        "パッシブ候補が出たら止まります）")
+            .Arg(current == 0 ? bulkMax : current)
+            .Arg(bulkMax));
+  }
+
+  auto dState = state->GetDemonState();
+  auto demon = dState->GetEntity();
+  if (!demon) {
+    return SendChatMessage(client, ChatType_t::CHAT_SELF,
+                           "悪魔を召喚すると状況を表示します");
+  }
+
+  int32_t gauge = demon->GetBenefitGauge();
+  int32_t next = 0;
+  for (int32_t g = gauge + 1; g <= gauge + 10000; g++) {
+    if (definitionManager->GetDevilBoostLotIDs(g).size() > 0) {
+      next = g;
+      break;
+    }
+  }
+
+  libcomp::String gaugeText =
+      libcomp::String("ゲージ: %1").Arg(gauge);
+  if (next) {
+    gaugeText = libcomp::String("%1（次のパッシブ候補は%2、あと%3個）")
+                    .Arg(gaugeText)
+                    .Arg(next)
+                    .Arg(next - gauge);
+  }
+  SendChatMessage(client, ChatType_t::CHAT_SELF, gaugeText);
+
+  if (demon->GetForceStackPending()) {
+    SendChatMessage(client, ChatType_t::CHAT_SELF,
+                    "パッシブ候補が未配置です（配置か破棄をすると"
+                    "次のアイテムを使えます）");
+  }
+
+  libcomp::String values;
+  for (size_t i = 0; i < 20; i++) {
+    int32_t fVal = demon->GetForceValues(i);
+    if (fVal <= 0) continue;
+
+    int32_t hundredths = (fVal % DEMON_FORCE_PRECISION) / 1000;
+    libcomp::String entry = libcomp::String("%1 %2.%3%4")
+                                .Arg(FORCE_NAMES[i])
+                                .Arg(fVal / DEMON_FORCE_PRECISION)
+                                .Arg(hundredths < 10 ? "0" : "")
+                                .Arg(hundredths);
+    values = values.IsEmpty() ? entry
+                              : libcomp::String("%1 / %2").Arg(values).Arg(entry);
+  }
+
+  return SendChatMessage(
+      client, ChatType_t::CHAT_SELF,
+      libcomp::String("フォース: %1")
+          .Arg(values.IsEmpty() ? libcomp::String("なし") : values));
 }
 
 bool ChatManager::GMCommand_DemonForce(
@@ -2150,6 +2259,11 @@ bool ChatManager::GMCommand_Help(
        {"@levelup LEVEL [DEMON]",
         "Levels up the player to the specified LEVEL or the",
         "player's current partner if DEMON is set to 'demon'."}},
+      {"force",
+       {"@force [COUNT|max]",
+        "Shows the summoned demon's force gauge, the uses left until",
+        "the next passive and the force values. COUNT sets how many",
+        "force items one use consumes (DEMON_FORCE_BULK)."}},
       {"license",
        {
            "@license",

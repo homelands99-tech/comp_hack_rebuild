@@ -314,6 +314,13 @@ bool ServerConstants::Initialize(const String& filePath) {
                            sConstants.AUTO_MATERIAL_TANK);
   }
 
+  // Optional: consume several demon force items with one use.
+  sConstants.DEMON_FORCE_BULK = 0;
+  if (constants.find("DEMON_FORCE_BULK") != constants.end()) {
+    success &= LoadInteger(constants["DEMON_FORCE_BULK"],
+                           sConstants.DEMON_FORCE_BULK);
+  }
+
   // Load other constants
   success &= LoadInteger(constants["DIGITALIZE_COOLDOWN"],
                          sConstants.DIGITALIZE_COOLDOWN);

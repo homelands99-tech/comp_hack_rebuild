@@ -34,6 +34,7 @@
 #include <Packet.h>
 #include <PacketCodes.h>
 #include <Randomizer.h>
+#include <ServerConstants.h>
 
 // object Includes
 #include <Item.h>
@@ -166,46 +167,103 @@ bool Parsers::DemonForce::Parse(
 
   bool statRaised = false;
   uint16_t pendingEffect = 0;
+  int32_t bGauge = demon ? demon->GetBenefitGauge() : 0;
+  uint32_t useCount = 0;
   if (success) {
-    // As long as a force stack effect is set or a value is raised, the
-    // force operation has succeeded
-    bool resultExists = false;
+    // How many items one use may consume (DEMON_FORCE_BULK constant). Items
+    // that place a stack effect directly are always used one at a time.
+    uint32_t maxUses = 1;
+    if (SVR_CONST.DEMON_FORCE_BULK > 1 && !toStack) {
+      uint16_t wanted = state->GetDemonForceBulk();
+      maxUses = (wanted == 0 || wanted > SVR_CONST.DEMON_FORCE_BULK)
+                    ? SVR_CONST.DEMON_FORCE_BULK
+                    : wanted;
 
-    // Items typically apply normal caps, cap at 1000 points just in case
-    const int32_t rMax = 1000 * DEMON_FORCE_PRECISION;
-    for (auto result : dfData->GetResults()) {
-      // Make sure its a value effect index
-      int8_t rType = result->GetType();
-      if (rType >= 0 && rType <= 19) {
-        // Check requirements and max values
-        int32_t points = demon->GetForceValues((size_t)rType);
-        if (points < rMax &&
-            (result->GetMinPoints() < 0 || result->GetMinPoints() <= points) &&
-            (result->GetMaxPoints() < 0 || result->GetMaxPoints() >= points)) {
-          // Add points
-          if ((points + result->GetPoints()) > rMax) {
-            boosted[rType] = rMax;
-          } else {
-            boosted[rType] = points + result->GetPoints();
-          }
-
-          statRaised |= (boosted[rType] / DEMON_FORCE_PRECISION) !=
-                        (points / DEMON_FORCE_PRECISION);
-        }
-
-        resultExists = true;
+      uint32_t owned = characterManager->GetExistingItemCount(
+          character, item->GetType(), inventory);
+      if (owned < maxUses) {
+        maxUses = owned;
       }
     }
 
-    std::unordered_map<uint32_t, uint32_t> items;
-    items[item->GetType()] = 1;
+    // Items typically apply normal caps, cap at 1000 points just in case
+    const int32_t rMax = 1000 * DEMON_FORCE_PRECISION;
 
-    if ((!resultExists || boosted.size() > 0 || toStack) &&
+    std::set<uint16_t> existingIDs;
+    for (uint16_t existing : demon->GetForceStack()) {
+      if (existing) {
+        existingIDs.insert(existing);
+      }
+    }
+
+    // Apply the item once per use. Stop early once nothing would be raised
+    // anymore or when a new stack effect becomes pending (it must be placed
+    // before more items can be used).
+    while (useCount < maxUses && !pendingEffect) {
+      // As long as a force stack effect is set or a value is raised, the
+      // force operation has succeeded
+      bool resultExists = false;
+      std::unordered_map<int8_t, int32_t> raised;
+      for (auto result : dfData->GetResults()) {
+        // Make sure its a value effect index
+        int8_t rType = result->GetType();
+        if (rType >= 0 && rType <= 19) {
+          // Check requirements and max values
+          auto it = boosted.find(rType);
+          int32_t points = it != boosted.end()
+                               ? it->second
+                               : demon->GetForceValues((size_t)rType);
+          if (points < rMax &&
+              (result->GetMinPoints() < 0 ||
+               result->GetMinPoints() <= points) &&
+              (result->GetMaxPoints() < 0 ||
+               result->GetMaxPoints() >= points)) {
+            // Add points
+            if ((points + result->GetPoints()) > rMax) {
+              raised[rType] = rMax;
+            } else {
+              raised[rType] = points + result->GetPoints();
+            }
+          }
+
+          resultExists = true;
+        }
+      }
+
+      if (resultExists && raised.size() == 0 && !toStack) {
+        break;
+      }
+
+      for (auto& rPair : raised) {
+        boosted[rPair.first] = rPair.second;
+      }
+
+      useCount++;
+      bGauge++;
+
+      auto lotIDs = definitionManager->GetDevilBoostLotIDs(bGauge);
+      if (lotIDs.size() > 0) {
+        // Determine which effect will become pending, removing dupes
+        lotIDs.remove_if([existingIDs](uint16_t val) {
+          return existingIDs.find(val) != existingIDs.end();
+        });
+
+        pendingEffect = libcomp::Randomizer::GetEntry(lotIDs);
+      }
+    }
+
+    for (auto& bPair : boosted) {
+      statRaised |= (bPair.second / DEMON_FORCE_PRECISION) !=
+                    (demon->GetForceValues((size_t)bPair.first) /
+                     DEMON_FORCE_PRECISION);
+    }
+
+    std::unordered_map<uint32_t, uint32_t> items;
+    items[item->GetType()] = useCount;
+
+    if (useCount > 0 &&
         characterManager->AddRemoveItems(client, items, false, itemID)) {
       // Perform the update
-      auto dbChanges =
-          libcomp::DatabaseChangeSet::Create(state->GetAccountUID());
-
       for (auto& bPair : boosted) {
         demon->SetForceValues((size_t)bPair.first, bPair.second);
       }
@@ -214,30 +272,10 @@ bool Parsers::DemonForce::Parse(
         demon->SetForceStack((size_t)stackSlot, dfData->GetExtraID());
       }
 
-      int32_t bGauge = demon->GetBenefitGauge();
-      bGauge++;
-
       demon->SetBenefitGauge(bGauge);
 
-      auto lotIDs = definitionManager->GetDevilBoostLotIDs(bGauge);
-      if (lotIDs.size() > 0) {
-        // Determine which effect will become pending
-        std::set<uint16_t> existingIDs;
-        for (uint16_t existing : demon->GetForceStack()) {
-          if (existing) {
-            existingIDs.insert(existing);
-          }
-        }
-
-        // Remove dupes
-        lotIDs.remove_if([existingIDs](uint16_t val) {
-          return existingIDs.find(val) != existingIDs.end();
-        });
-
-        pendingEffect = libcomp::Randomizer::GetEntry(lotIDs);
-        if (pendingEffect) {
-          demon->SetForceStackPending(pendingEffect);
-        }
+      if (pendingEffect) {
+        demon->SetForceStackPending(pendingEffect);
       }
 
       server->GetWorldDatabase()->QueueUpdate(demon, state->GetAccountUID());

@@ -230,6 +230,17 @@ class ChatManager {
       const std::list<libcomp::String>& args);
 
   /**
+   * GM (and, with DEMON_FORCE_BULK, player) command to show the demon force
+   * status and set how many force items one use consumes.
+   * @param client Pointer to the client that sent the command
+   * @param args List of arguments for the command
+   * @return true if the command was handled properly, else false
+   */
+  bool GMCommand_Force(
+      const std::shared_ptr<channel::ChannelClientConnection>& client,
+      const std::list<libcomp::String>& args);
+
+  /**
    * GM command to set Demon Force abilities onto the Force Stack.
    * @param client Pointer to the client that sent the command
    * @param args List of arguments for the command
