@@ -350,7 +350,8 @@ bool Parsers::DemonForce::Parse(
 
     reply.WriteU16Little(pendingEffect);
 
-    if (pendingEffect) {
+    // Players can turn the gauge effect off with "@force effect off"
+    if (pendingEffect && !state->GetDemonForceNoEffect()) {
       libcomp::Packet notify;
       notify.WritePacketCode(
           ChannelToClientPacketCode_t::PACKET_DEMON_FORCE_GAUGE);

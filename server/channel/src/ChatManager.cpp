@@ -1068,6 +1068,22 @@ bool ChatManager::GMCommand_Force(
     }
 
     libcomp::String value = argsCopy.front().ToLower();
+    if (value == "effect") {
+      argsCopy.pop_front();
+      libcomp::String mode =
+          argsCopy.empty() ? libcomp::String() : argsCopy.front().ToLower();
+      if (mode != "on" && mode != "off") {
+        return SendChatMessage(client, ChatType_t::CHAT_SELF,
+                               "使い方: @force effect on または off");
+      }
+
+      state->SetDemonForceNoEffect(mode == "off");
+      return SendChatMessage(
+          client, ChatType_t::CHAT_SELF,
+          mode == "off" ? "ゲージ満タンの演出: なし"
+                        : "ゲージ満タンの演出: あり");
+    }
+
     uint16_t count = 0;
     if (value != "max" &&
         (!GetIntegerArg<uint16_t>(count, argsCopy) || count < 1)) {
@@ -2260,10 +2276,11 @@ bool ChatManager::GMCommand_Help(
         "Levels up the player to the specified LEVEL or the",
         "player's current partner if DEMON is set to 'demon'."}},
       {"force",
-       {"@force [COUNT|max]",
+       {"@force [COUNT|max|effect on/off]",
         "Shows the summoned demon's force gauge, the uses left until",
         "the next passive and the force values. COUNT sets how many",
-        "force items one use consumes (DEMON_FORCE_BULK)."}},
+        "force items one use consumes (DEMON_FORCE_BULK). 'effect",
+        "off' skips the full gauge effect notification."}},
       {"license",
        {
            "@license",

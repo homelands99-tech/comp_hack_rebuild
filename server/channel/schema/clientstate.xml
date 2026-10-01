@@ -43,6 +43,7 @@
         </member>
         <member type="s32" name="InstanceBethel"/>
         <member type="u16" name="DemonForceBulk"/>
+        <member type="bool" name="DemonForceNoEffect"/>
     </object>
     <object name="ClientCostAdjustment" persistent="false">
         <member type="u8" name="Category"/>
