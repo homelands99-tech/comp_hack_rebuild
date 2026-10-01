@@ -3745,14 +3745,8 @@ int32_t CharacterManager::ReunionBulk(
     return -1;
   }
 
-  auto chatManager = server->GetChatManager();
-  auto say = [&](const libcomp::String& message) {
-    chatManager->SendChatMessage(client, ChatType_t::CHAT_SELF, message);
-  };
-
   const uint32_t costPerRank = SVR_CONST.REUNION_BULK_COST;
   if (!costPerRank) {
-    say("一括転生は無効です（REUNION_BULK_COST）");
     return -1;
   }
 
@@ -3763,7 +3757,6 @@ int32_t CharacterManager::ReunionBulk(
   auto character = cState->GetEntity();
   auto inventory = character ? character->GetItemBoxes(0).Get() : nullptr;
   if (!demon || !devilData || !inventory || !IsMitamaDemon(devilData)) {
-    say("御霊化した仲魔を召喚してください");
     return -1;
   }
 
@@ -3773,7 +3766,6 @@ int32_t CharacterManager::ReunionBulk(
 
   for (int8_t rank : demon->GetReunion()) {
     if (rank < 8) {
-      say("全ての系統がランク 8 以上の仲魔だけが対象です");
       return -1;
     }
   }
@@ -3792,7 +3784,6 @@ int32_t CharacterManager::ReunionBulk(
     return -1;
   }
 
-  libcomp::String typeName = growthData->GetName();
   uint8_t maxRank = server->GetWorldSharedConfig()->GetReunionMax();
   int8_t current = demon->GetReunion((size_t)groupIdx);
   int32_t room = maxRank > current ? (int32_t)(maxRank - current) : 0;
@@ -3833,63 +3824,23 @@ int32_t CharacterManager::ReunionBulk(
   int32_t byKeep = (int32_t)std::min<uint32_t>(keepItems, 10000);
 
   int32_t byMaterials = 0;
-  libcomp::String materialText;
   std::list<std::pair<std::pair<uint32_t, uint16_t>, int32_t>> materialUses;
   for (auto& m : materials) {
     uint32_t owned = GetExistingItemCount(character, m.first, inventory);
     int32_t uses = (int32_t)std::min<uint32_t>(owned / m.second, 10000);
     byMaterials += uses;
     materialUses.push_back(std::make_pair(m, uses));
-
-    libcomp::String entry =
-        libcomp::String("%1 %2個（%3個で1回）→ %4回分")
-            .Arg(definitionManager->GetItemName(m.first))
-            .Arg(owned)
-            .Arg(m.second)
-            .Arg(uses);
-    materialText = materialText.IsEmpty()
-                       ? entry
-                       : libcomp::String("%1、%2").Arg(materialText).Arg(entry);
   }
 
   int32_t possible = std::min(std::min(room, byMacca),
                               std::min(byKeep, byMaterials));
 
-  auto report = [&]() {
-    say(libcomp::String("%1：現在ランク %2（最大 %3、あと %4）")
-            .Arg(typeName)
-            .Arg(current)
-            .Arg(maxRank)
-            .Arg(room));
-    say(libcomp::String("マッカ %1 → %2回分（1回 %3）／レベルダウン防止 %4個 "
-                        "→ %4回分")
-            .Arg(macca)
-            .Arg(byMacca)
-            .Arg(costPerRank)
-            .Arg(keepItems));
-    say(libcomp::String("素材：%1").Arg(materialText.IsEmpty()
-                                          ? libcomp::String("なし")
-                                          : materialText));
-    say(libcomp::String("今の所持品で上げられるのは最大 %1 ランクです")
-            .Arg(possible));
-  };
-
   if (count < 0) {
-    report();
     return possible;
   }
 
   int32_t raise = count == 0 ? possible : count;
   if (raise <= 0 || raise > possible) {
-    report();
-    if (room == 0) {
-      say("この系統はもう上げられません");
-    } else if (raise > room) {
-      say(libcomp::String("上限まであと %1 ランクです").Arg(room));
-    } else {
-      say(libcomp::String("%1 ランク分の費用が足りません").Arg(raise));
-    }
-
     return 0;
   }
 
@@ -3912,7 +3863,6 @@ int32_t CharacterManager::ReunionBulk(
   success &= keepLeft == 0;
 
   int32_t materialLeft = raise;
-  libcomp::String paidText;
   for (auto& mu : materialUses) {
     int32_t take = std::min(materialLeft, mu.second);
     if (take <= 0) continue;
@@ -3920,20 +3870,11 @@ int32_t CharacterManager::ReunionBulk(
     uint64_t amount = (uint64_t)take * mu.first.second;
     success &= CalculateItemRemoval(client, mu.first.first, amount, cost) == 0;
     materialLeft -= take;
-
-    libcomp::String entry =
-        libcomp::String("%1 %2個")
-            .Arg(definitionManager->GetItemName(mu.first.first))
-            .Arg(amount);
-    paidText = paidText.IsEmpty()
-                   ? entry
-                   : libcomp::String("%1、%2").Arg(paidText).Arg(entry);
   }
 
   success &= materialLeft == 0;
 
   if (!success || !UpdateItems(client, false, inserts, cost)) {
-    say("支払いに失敗しました（何も変わっていません）");
     return -1;
   }
 
@@ -3968,15 +3909,6 @@ int32_t CharacterManager::ReunionBulk(
   notify.WriteS8(CalculateMagReduction(client, demon));
 
   server->GetZoneManager()->BroadcastPacket(client, notify);
-
-  say(libcomp::String("%1 のランクが %2 → %3 になりました")
-          .Arg(typeName)
-          .Arg(current)
-          .Arg(newRank));
-  say(libcomp::String("支払い：マッカ %1、レベルダウン防止 %2個、%3")
-          .Arg((uint64_t)raise * costPerRank)
-          .Arg(raise)
-          .Arg(paidText));
 
   return raise;
 }

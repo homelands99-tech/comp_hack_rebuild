@@ -782,7 +782,7 @@ class CharacterManager {
    * (REUNION_BULK_KEEP_ITEMS) and one set of the rank 9 reunion materials of
    * the group (the materials needed most are used first, the shared ones in
    * REUNION_BULK_LAST_ITEMS last). The growth type is
-   * not changed. Results and the costs are reported in the chat.
+   * not changed. Nothing is written to the chat (events show the numbers).
    * @param cState Pointer to the character state
    * @param groupIdx Reunion group index (0-11, Tiwaz to Wyrd)
    * @param count Ranks to raise, 0 for as many as can be paid or -1 to only
