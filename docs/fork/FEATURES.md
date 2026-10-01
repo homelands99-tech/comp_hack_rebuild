@@ -36,3 +36,50 @@ can be stored in the tank go there automatically (up to the tank limit; the
 rest goes to the inventory). Loot that fits in the tank can be picked up even
 with a full inventory. Enable with `AUTO_MATERIAL_TANK` = 1 in
 constants.xml.*
+
+## 一括転生（イベント用） / Bulk reunion for events ##
+
+御霊化した仲魔の転生ランク（テイワズ〜ウィアドの 12 系統）を、NPC のイベントから
+まとめて上げるための仕組みです。会話や選択肢はイベントの XML で自由に作れます。
+
+### 動作 ###
+
+- 対象: 召喚中の仲魔が御霊化していて、12 系統すべてがランク 8 以上のとき。
+- 1 ランクごとの費用（まとめて支払い、足りなければ何も変わりません）:
+  - マッカ `REUNION_BULK_COST`
+  - レベルダウン防止のアイテム 1 個（`REUNION_BULK_KEEP_ITEMS`、初期値はイビルガム【100】の
+    21894・21907。どちらでも、混ざっていても可）
+  - その系統のランク 9 の転生素材 1 回分（`DevilLVUpRateData` の 4 種類のどれか）。
+    必要個数の多い素材から使います。1 個で済む素材は `REUNION_BULK_ANY_ITEMS`
+    （初期値は原初のルーンストーン 21590）だけを使い、それ以外の珍しい素材は使いません。
+- レベルは下がらず、成長タイプも変わりません。上限は world の `ReunionMax` です。
+- 今のランク・上げられる数・費用・結果は、チャット欄に表示します。
+
+### イベントから使う ###
+
+- 条件スクリプト `bool_reunionAllRanks`（`EventScriptCondition`）
+  - `value1`: 12 系統すべてがこのランク以上（8、99 など）
+  - `value2`: 1 なら御霊化していることも条件にする
+- アクションスクリプト `action_reunionBulk`（`ActionRunScript`）
+  - `params`: 系統 1〜12（1 テイワズ … 12 ウィアド）、上げる数（数字 / `max` = 払えるところまで /
+    `info` = 表示だけ）
+- スクリプトは datastore の `scripts` に置きます（このリポジトリには含めていません）。
+
+### 設定 ###
+
+```xml
+<constant name="REUNION_BULK_COST">500000</constant>
+```
+
+`0` または行が無い場合は無効です。アイテムの一覧を変える場合は、
+`REUNION_BULK_KEEP_ITEMS` / `REUNION_BULK_ANY_ITEMS` を他の一覧の定数と同じ形で書きます。
+
+### 関係するソース ###
+
+- `libhack/src/ServerConstants.h/.cpp`: `REUNION_BULK_COST`、`REUNION_BULK_KEEP_ITEMS`、`REUNION_BULK_ANY_ITEMS`（省略可能）
+- `server/channel/src/CharacterManager.h/.cpp`: `ReunionBulk()`（スクリプトからも呼べる）
+
+*English: `CharacterManager::ReunionBulk` (also bound for scripts) raises one
+reunion group of the summoned mitama demon (all groups at rank 8+) by N ranks
+at once, paying N x `REUNION_BULK_COST` macca, N level keeping items and N rank
+9 material sets, without the level reset. Enable with `REUNION_BULK_COST`.*

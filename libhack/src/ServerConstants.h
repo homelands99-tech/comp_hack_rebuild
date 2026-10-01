@@ -469,6 +469,19 @@ class ServerConstants {
     /// there automatically (1 = on, 0 = off). Optional, defaults to off.
     uint8_t AUTO_MATERIAL_TANK;
 
+    /// Macca paid per rank by the bulk reunion (CharacterManager::ReunionBulk,
+    /// used by events). 0 = off. Optional, defaults to off.
+    uint32_t REUNION_BULK_COST;
+
+    /// Items that stand in for the level keeping item on a bulk reunion, one
+    /// per rank (any mix). Optional, defaults to the Evil Gum [100] items.
+    std::list<uint32_t> REUNION_BULK_KEEP_ITEMS;
+
+    /// Reunion materials that are needed only once per rank but may still be
+    /// used by a bulk reunion (other single materials are rare and skipped).
+    /// Optional, defaults to the primal rune stone.
+    std::set<uint32_t> REUNION_BULK_ANY_ITEMS;
+
     /// Default zone to move players when no other zone is found
     uint32_t ZONE_DEFAULT;
 
