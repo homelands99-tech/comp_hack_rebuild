@@ -780,7 +780,8 @@ class CharacterManager {
    * ranks at once without the level reset (for events, REUNION_BULK_COST).
    * Every rank costs REUNION_BULK_COST macca, one level keeping item
    * (REUNION_BULK_KEEP_ITEMS) and one set of the rank 9 reunion materials of
-   * the group (the materials needed most are used first). The growth type is
+   * the group (the materials needed most are used first, the shared ones in
+   * REUNION_BULK_LAST_ITEMS last). The growth type is
    * not changed. Results and the costs are reported in the chat.
    * @param cState Pointer to the character state
    * @param groupIdx Reunion group index (0-11, Tiwaz to Wyrd)

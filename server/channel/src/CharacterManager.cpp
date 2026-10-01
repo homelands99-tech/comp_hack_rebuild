@@ -3797,22 +3797,27 @@ int32_t CharacterManager::ReunionBulk(
   int8_t current = demon->GetReunion((size_t)groupIdx);
   int32_t room = maxRank > current ? (int32_t)(maxRank - current) : 0;
 
-  // Any one material set pays for a rank. Use the ones needed most first and
-  // skip rare single materials unless listed in REUNION_BULK_ANY_ITEMS.
+  // Any one material set pays for a rank. Use the ones needed most first,
+  // the shared materials (REUNION_BULK_LAST_ITEMS) last.
   std::list<std::pair<uint32_t, uint16_t>> materials;
   for (auto con : growthData->GetReunionConditions()) {
     uint32_t itemID = con->GetItemID();
     uint16_t amount = con->GetAmount();
-    if (itemID && amount &&
-        (amount > 1 || SVR_CONST.REUNION_BULK_ANY_ITEMS.find(itemID) !=
-                           SVR_CONST.REUNION_BULK_ANY_ITEMS.end())) {
+    if (itemID && amount) {
       materials.push_back(std::make_pair(itemID, amount));
     }
   }
 
-  materials.sort([](const std::pair<uint32_t, uint16_t>& a,
-                    const std::pair<uint32_t, uint16_t>& b) {
-    return a.second > b.second;
+  auto isLast = [](uint32_t itemID) {
+    return SVR_CONST.REUNION_BULK_LAST_ITEMS.find(itemID) !=
+           SVR_CONST.REUNION_BULK_LAST_ITEMS.end();
+  };
+
+  materials.sort([&isLast](const std::pair<uint32_t, uint16_t>& a,
+                           const std::pair<uint32_t, uint16_t>& b) {
+    bool aLast = isLast(a.first);
+    bool bLast = isLast(b.first);
+    return aLast != bLast ? !aLast : a.second > b.second;
   });
 
   bool compressible = true;

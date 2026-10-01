@@ -973,13 +973,13 @@ bool ServerConstants::Initialize(const String& filePath) {
     }
   }
 
-  sConstants.REUNION_BULK_ANY_ITEMS = {21590};
-  complexIter = complexConstants.find("REUNION_BULK_ANY_ITEMS");
+  sConstants.REUNION_BULK_LAST_ITEMS = {21590};
+  complexIter = complexConstants.find("REUNION_BULK_LAST_ITEMS");
   if (complexIter != complexConstants.end()) {
     std::list<String> strList;
-    sConstants.REUNION_BULK_ANY_ITEMS.clear();
+    sConstants.REUNION_BULK_LAST_ITEMS.clear();
     if (!LoadStringList(complexIter->second, strList)) {
-      LogServerConstantsErrorMsg("Failed to load REUNION_BULK_ANY_ITEMS\n");
+      LogServerConstantsErrorMsg("Failed to load REUNION_BULK_LAST_ITEMS\n");
       return false;
     }
 
@@ -987,11 +987,11 @@ bool ServerConstants::Initialize(const String& filePath) {
       uint32_t id = 0;
       if (!LoadInteger(elem.C(), id)) {
         LogServerConstantsErrorMsg(
-            "Failed to load an entry in REUNION_BULK_ANY_ITEMS\n");
+            "Failed to load an entry in REUNION_BULK_LAST_ITEMS\n");
         return false;
       }
 
-      sConstants.REUNION_BULK_ANY_ITEMS.insert(id);
+      sConstants.REUNION_BULK_LAST_ITEMS.insert(id);
     }
   }
 

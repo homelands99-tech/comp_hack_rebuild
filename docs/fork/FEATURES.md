@@ -48,10 +48,10 @@ constants.xml.*
 - 1 ランクごとの費用（まとめて支払い、足りなければ何も変わりません）:
   - マッカ `REUNION_BULK_COST`
   - レベルダウン防止のアイテム 1 個（`REUNION_BULK_KEEP_ITEMS`、初期値はイビルガム【100】の
-    21894・21907。どちらでも、混ざっていても可）
+    21894（譲渡不可）・21907。どちらでも、混ざっていても可。書いた順に使う＝譲渡不可から）
   - その系統のランク 9 の転生素材 1 回分（`DevilLVUpRateData` の 4 種類のどれか）。
-    必要個数の多い素材から使います。1 個で済む素材は `REUNION_BULK_ANY_ITEMS`
-    （初期値は原初のルーンストーン 21590）だけを使い、それ以外の珍しい素材は使いません。
+    必要個数の多い素材から使い、全系統共通の素材 `REUNION_BULK_LAST_ITEMS`
+    （初期値は原初のルーンストーン 21590）は最後に使います。
 - レベルは下がらず、成長タイプも変わりません。上限は world の `ReunionMax` です。
 - 今のランク・上げられる数・費用・結果は、チャット欄に表示します。
 
@@ -72,11 +72,11 @@ constants.xml.*
 ```
 
 `0` または行が無い場合は無効です。アイテムの一覧を変える場合は、
-`REUNION_BULK_KEEP_ITEMS` / `REUNION_BULK_ANY_ITEMS` を他の一覧の定数と同じ形で書きます。
+`REUNION_BULK_KEEP_ITEMS` / `REUNION_BULK_LAST_ITEMS` を他の一覧の定数と同じ形で書きます。
 
 ### 関係するソース ###
 
-- `libhack/src/ServerConstants.h/.cpp`: `REUNION_BULK_COST`、`REUNION_BULK_KEEP_ITEMS`、`REUNION_BULK_ANY_ITEMS`（省略可能）
+- `libhack/src/ServerConstants.h/.cpp`: `REUNION_BULK_COST`、`REUNION_BULK_KEEP_ITEMS`、`REUNION_BULK_LAST_ITEMS`（省略可能）
 - `server/channel/src/CharacterManager.h/.cpp`: `ReunionBulk()`（スクリプトからも呼べる）
 
 *English: `CharacterManager::ReunionBulk` (also bound for scripts) raises one
