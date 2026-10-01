@@ -170,19 +170,10 @@ bool Parsers::DemonForce::Parse(
   int32_t bGauge = demon ? demon->GetBenefitGauge() : 0;
   uint32_t useCount = 0;
   if (success) {
-    // How many items one use may consume (DEMON_FORCE_BULK constant). Only
-    // items that raise force values are used in bulk; items that place or
-    // clear a stack effect are always used one at a time.
-    bool raisesValues = false;
-    for (auto result : dfData->GetResults()) {
-      if (result->GetType() >= 0 && result->GetType() <= 19) {
-        raisesValues = true;
-        break;
-      }
-    }
-
+    // How many items one use may consume (DEMON_FORCE_BULK constant). Items
+    // that place a stack effect directly are always used one at a time.
     uint32_t maxUses = 1;
-    if (SVR_CONST.DEMON_FORCE_BULK > 1 && !toStack && raisesValues) {
+    if (SVR_CONST.DEMON_FORCE_BULK > 1 && !toStack) {
       uint16_t wanted = state->GetDemonForceBulk();
       maxUses = (wanted == 0 || wanted > SVR_CONST.DEMON_FORCE_BULK)
                     ? SVR_CONST.DEMON_FORCE_BULK
