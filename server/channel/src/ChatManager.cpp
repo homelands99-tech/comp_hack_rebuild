@@ -2582,7 +2582,7 @@ bool ChatManager::GMCommand_LevelUp(
   int8_t lvl;
 
   if (GetIntegerArg<int8_t>(lvl, argsCopy)) {
-    if (lvl > 99 || lvl < 1) {
+    if (lvl < 1) {
       return false;
     }
   } else {

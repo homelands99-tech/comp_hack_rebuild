@@ -3193,9 +3193,9 @@ void EventManager::AddDemonQuestRewards(
 
   // Calculate normal XP gain
   int8_t cLvl = character->GetCoreStats()->GetLevel();
-  if (cLvl < 99) {
+  if (cLvl < server->GetCharacterManager()->GetLevelCap(true)) {
     // Formula estimated from collected data, not 100% accurate
-    double lvlXP = (double)libhack::LEVEL_XP_REQUIREMENTS[(size_t)cLvl];
+    double lvlXP = (double)CharacterManager::GetLevelXP(cLvl);
     double normalXP = floor(((0.00000691775 * (double)(cLvl * cLvl)) -
                              (0.001384 * (double)cLvl) + 0.06922) *
                             lvlXP);

@@ -37,6 +37,7 @@
 #include <array>
 #include <set>
 #include <unordered_map>
+#include <vector>
 
 namespace tinyxml2 {
 class XMLElement;
@@ -468,6 +469,16 @@ class ServerConstants {
     /// If looted items that can be stored in the material tank are put
     /// there automatically (1 = on, 0 = off). Optional, defaults to off.
     uint8_t AUTO_MATERIAL_TANK;
+
+    /// Level cap for player characters only (demons keep the world level
+    /// cap, WorldSharedConfig LevelCap). 0 = off: players use the world level
+    /// cap too. 1-127; levels above 99 need PLAYER_LEVEL_XP. Optional,
+    /// defaults to off.
+    uint8_t PLAYER_LEVEL_CAP;
+
+    /// Experience a player needs from level 99 to 100, 100 to 101 and so on
+    /// (comma separated, up to 28 values for level 127). Optional.
+    std::vector<uint64_t> PLAYER_LEVEL_XP;
 
     /// Default zone to move players when no other zone is found
     uint32_t ZONE_DEFAULT;
