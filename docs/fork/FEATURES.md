@@ -60,7 +60,7 @@ constants.xml.*
 <!-- プレイヤーの上限（0 または行が無い = 悪魔と同じ上限） -->
 <constant name="PLAYER_LEVEL_CAP">110</constant>
 <!-- 99→100, 100→101, … の必要経験値（上限 - 99 個以上） -->
-<constant name="PLAYER_LEVEL_XP">1434519076909,1721423000000,...</constant>
+<constant name="PLAYER_LEVEL_XP">895842000000,990142000000,...</constant>
 ```
 
 `PLAYER_LEVEL_CAP` が 127 を超える、または `PLAYER_LEVEL_XP` の数が足りない場合はサーバーが起動しません。
