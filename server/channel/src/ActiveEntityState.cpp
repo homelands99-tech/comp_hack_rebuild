@@ -1866,7 +1866,10 @@ bool ActiveEntityState::IsIgnoreEffect(uint32_t effectType) const {
 }
 
 void ActiveEntityState::ResetAIIgnored() {
-  bool ignore = false;
+  // Invincible minions are always ignored by the AI
+  auto aiState = GetAIState();
+  bool ignore = aiState && aiState->GetCompanion() &&
+                aiState->ActionOverridesKeyExists("Invincible");
   for (auto& pair : mStatusEffects) {
     if (IsIgnoreEffect(pair.first)) {
       ignore = true;

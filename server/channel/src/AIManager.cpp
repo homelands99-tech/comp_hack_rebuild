@@ -128,6 +128,11 @@ static float CompanionParam(const std::shared_ptr<channel::AIState>& aiState,
 // What a companion does to help (1 = on, 0 = off)
 #define COMPANION_USE(key) (CompanionParam(aiState, key, 1.f) != 0.f)
 
+// Minion settings set by the server (1 = on): NoAttack (support only),
+// Stay (does not follow), Invincible
+#define COMPANION_FLAG(key) \
+  (aiState->GetCompanion() && CompanionParam(aiState, key, 0.f) != 0.f)
+
 using namespace channel;
 
 std::unordered_map<std::string, std::shared_ptr<libhack::ScriptEngine>>
@@ -1432,7 +1437,8 @@ bool AIManager::UpdateEnemyState(
   }
 
   // Check if we need to pursue the follow target
-  if (aiState->HasFollowTarget() && Follow(eState, now)) {
+  if (aiState->HasFollowTarget() && !COMPANION_FLAG("Stay") &&
+      Follow(eState, now)) {
     return false;
   }
 
@@ -1460,6 +1466,16 @@ bool AIManager::UpdateEnemyState(
 
     Wander(eState, eBase);
     return true;
+  }
+
+  if (COMPANION_FLAG("NoAttack")) {
+    // Support minions never fight: back to staying with the owner
+    if (aiState->GetTargetEntityID() > 0) {
+      UpdateAggro(eState, -1);
+    }
+
+    aiState->SetStatus(aiState->GetDefaultStatus());
+    return false;
   }
 
   auto zone = eState->GetZone();
@@ -2052,6 +2068,11 @@ std::shared_ptr<ActiveEntityState> AIManager::Retarget(
 
   int32_t currentTarget = aiState->GetTargetEntityID();
 
+  if (COMPANION_FLAG("NoAttack")) {
+    // Support minions do not look for targets
+    return nullptr;
+  }
+
   float sourceX = eState->GetCurrentX();
   float sourceY = eState->GetCurrentY();
 
@@ -2581,7 +2602,7 @@ bool AIManager::UpdateCompanionSkill(
                 20.f;
   float dist = eState->GetDistance(owner);
   if (dist > range) {
-    bool moving = Chase(eState, ownerID, range);
+    bool moving = !COMPANION_FLAG("Stay") && Chase(eState, ownerID, range);
     LogAIManagerWarning([&]() {
       return libcomp::String("[sub] skill %1 charged, owner too far %2 > %3,"
                              " chase %4 (canMove %5)\n")
@@ -2700,7 +2721,8 @@ bool AIManager::PrepareCompanionSkill(
                     20.f;
       float dist = eState->GetDistance(owner);
       if (dist > range) {
-        bool moving = Chase(eState, owner->GetEntityID(), range);
+        bool moving =
+            !COMPANION_FLAG("Stay") && Chase(eState, owner->GetEntityID(), range);
         LogAIManagerWarning([&]() {
           return libcomp::String("[sub] want skill %1, owner too far %2 > %3,"
                                  " chase %4 (canMove %5)\n")

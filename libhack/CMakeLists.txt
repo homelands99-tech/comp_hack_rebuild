@@ -355,6 +355,8 @@ OBJGEN_XML(${PROJECT_NAME}_STRUCTS
     DemonFamiliarityType.cpp
     DemonPresent.h
     DemonPresent.cpp
+    MinionData.h
+    MinionData.cpp
     DemonQuestReward.h
     DemonQuestReward.cpp
     DropSet.h

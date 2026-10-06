@@ -33,6 +33,7 @@
 #include <PacketCodes.h>
 #include <ServerConstants.h>
 #include <ServerDataManager.h>
+#include <MinionData.h>
 
 // object Includes
 #include <Account.h>
@@ -138,6 +139,7 @@ ChatManager::ChatManager(const std::weak_ptr<ChannelServer>& server)
   mGMands["reunion"] = &ChatManager::GMCommand_Reunion;
   mGMands["scrap"] = &ChatManager::GMCommand_Scrap;
   mGMands["sub"] = &ChatManager::GMCommand_SubDemon;
+  mGMands["minion"] = &ChatManager::GMCommand_Minion;
   mGMands["skill"] = &ChatManager::GMCommand_Skill;
   mGMands["forgetskill"] = &ChatManager::GMCommand_ForgetSkill;
   mGMands["skillpoint"] = &ChatManager::GMCommand_SkillPoint;
@@ -3361,6 +3363,74 @@ bool ChatManager::GMCommand_SubDemon(
 
   return SendChatMessage(client, ChatType_t::CHAT_SELF,
                          "2 体目を出しました（自動で戦います）。@sub off で戻します。");
+}
+
+bool ChatManager::GMCommand_Minion(
+    const std::shared_ptr<channel::ChannelClientConnection>& client,
+    const std::list<libcomp::String>& args) {
+  if (!HaveUserLevel(client, SVR_CONST.GM_CMD_LVL_LEVEL_UP)) {
+    return true;
+  }
+
+  auto server = mServer.lock();
+  auto characterManager = server->GetCharacterManager();
+  auto definitionManager = server->GetDefinitionManager();
+  auto state = client->GetClientState();
+
+  libcomp::String arg = args.empty() ? "" : args.front().ToLower();
+  if (arg.IsEmpty() || arg == "list") {
+    SendChatMessage(client, ChatType_t::CHAT_SELF,
+                    "使い方: @minion 型の番号（出す・戻す） / @minion off / "
+                    "@minion list");
+    auto all = server->GetServerDataManager()->GetAllMinionData();
+    std::set<uint32_t> ids;
+    for (auto& pair : all) {
+      ids.insert(pair.first);
+    }
+
+    if (ids.empty()) {
+      SendChatMessage(client, ChatType_t::CHAT_SELF,
+                      "ミニオンの型がありません（data/minions.xml）。");
+    }
+
+    for (uint32_t id : ids) {
+      auto def = all[id];
+      auto devil = definitionManager->GetDevilData(def->GetDemonType());
+      SendChatMessage(
+          client, ChatType_t::CHAT_SELF,
+          libcomp::String("%1: %2（%3 %4）%5")
+              .Arg(id)
+              .Arg(def->GetName())
+              .Arg(devil ? devil->GetBasic()->GetName() : libcomp::String("?"))
+              .Arg(def->GetKind() == objects::MinionData::Kind_t::SUPPORT
+                       ? "置物"
+                       : "戦う")
+              .Arg(state->GetMinionEntityID() && state->GetMinionType() == id
+                       ? " ← 出ている"
+                       : ""));
+    }
+
+    return true;
+  }
+
+  if (arg == "off") {
+    return SendChatMessage(client, ChatType_t::CHAT_SELF,
+                           characterManager->DismissMinion(client)
+                               ? "ミニオンを戻しました。"
+                               : "ミニオンは出ていません。");
+  }
+
+  bool ok = false;
+  uint32_t id = arg.ToInteger<uint32_t>(&ok);
+  if (!ok || !id) {
+    return SendChatMessage(client, ChatType_t::CHAT_SELF,
+                           "使い方: @minion 型の番号（出す・戻す） / "
+                           "@minion off / @minion list");
+  }
+
+  libcomp::String message;
+  characterManager->SummonMinion(client, id, message);
+  return SendChatMessage(client, ChatType_t::CHAT_SELF, message);
 }
 
 bool ChatManager::GMCommand_Scrap(

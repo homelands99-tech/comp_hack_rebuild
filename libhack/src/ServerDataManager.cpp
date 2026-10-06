@@ -46,6 +46,7 @@
 #include <ActionZoneInstance.h>
 #include <DemonFamiliarityType.h>
 #include <DemonPresent.h>
+#include <MinionData.h>
 #include <DemonQuestReward.h>
 #include <DropSet.h>
 #include <EnchantSetData.h>
@@ -340,6 +341,16 @@ ServerDataManager::GetDemonPresentData(uint32_t id) {
   return GetObjectByID<uint32_t, objects::DemonPresent>(id, mDemonPresentData);
 }
 
+const std::shared_ptr<objects::MinionData> ServerDataManager::GetMinionData(
+    uint32_t id) {
+  return GetObjectByID<uint32_t, objects::MinionData>(id, mMinionData);
+}
+
+std::unordered_map<uint32_t, std::shared_ptr<objects::MinionData>>
+ServerDataManager::GetAllMinionData() {
+  return mMinionData;
+}
+
 std::unordered_map<uint32_t, std::shared_ptr<objects::DemonQuestReward>>
 ServerDataManager::GetDemonQuestRewardData() {
   return mDemonQuestRewardData;
@@ -400,6 +411,14 @@ bool ServerDataManager::LoadData(DataStore* pDataStore,
 
       failure = !LoadObjects<objects::DemonPresent>(
           pDataStore, "/data/demonpresent", definitionManager, true, true);
+    }
+
+    if (!failure) {
+      LogServerDataManagerDebugMsg("Loading minion server definitions...\n");
+
+      // Optional: data/minions.xml (no file = no minions)
+      failure = !LoadObjects<objects::MinionData>(
+          pDataStore, "/data/minions", definitionManager, true, true);
     }
 
     if (!failure) {
@@ -2029,6 +2048,41 @@ bool ServerDataManager::LoadObject<objects::DemonPresent>(
   }
 
   mDemonPresentData[id] = present;
+
+  return true;
+}
+
+template <>
+bool ServerDataManager::LoadObject<objects::MinionData>(
+    const tinyxml2::XMLDocument& doc, const tinyxml2::XMLElement* objNode,
+    DefinitionManager* definitionManager) {
+  auto minion = std::shared_ptr<objects::MinionData>(new objects::MinionData);
+  if (!minion->Load(doc, *objNode)) {
+    return false;
+  }
+
+  uint32_t id = minion->GetID();
+  if (!id || mMinionData.find(id) != mMinionData.end()) {
+    LogServerDataManagerError([&]() {
+      return String("Invalid or duplicate minion entry encountered: %1\n")
+          .Arg(id);
+    });
+
+    return false;
+  }
+
+  if (definitionManager && !definitionManager->GetDevilData(
+                               minion->GetDemonType())) {
+    LogServerDataManagerError([&]() {
+      return String("Minion %1 has an invalid demon type: %2\n")
+          .Arg(id)
+          .Arg(minion->GetDemonType());
+    });
+
+    return false;
+  }
+
+  mMinionData[id] = minion;
 
   return true;
 }

@@ -375,6 +375,67 @@ class CharacterManager {
       int64_t xp);
 
   /**
+   * Summon a minion of a type in data/minions.xml (MINION_ENABLED) next to
+   * the character, or return it if that type is already out.
+   * @param client Pointer to the client connection
+   * @param minionID Minion type ID
+   * @param message Output message for the player
+   * @return true if a minion was summoned or returned
+   */
+  bool SummonMinion(
+      const std::shared_ptr<channel::ChannelClientConnection>& client,
+      uint32_t minionID, libcomp::String& message);
+
+  /**
+   * Remove the client's minion if it exists.
+   * @param client Pointer to the client connection
+   * @param onlyEntityID If not 0, only remove the minion with this entity ID
+   * @return true if a minion was removed
+   */
+  bool DismissMinion(
+      const std::shared_ptr<channel::ChannelClientConnection>& client,
+      int32_t onlyEntityID = 0);
+
+  /**
+   * Note that the client's minion was killed (death cooldown).
+   * @param client Pointer to the client connection
+   * @param entityID Entity ID of the killed ally
+   */
+  void MinionDied(
+      const std::shared_ptr<channel::ChannelClientConnection>& client,
+      int32_t entityID);
+
+  /**
+   * Check if summoning the minion type with an item should use up the item
+   * (the type allows it and the minion would really be summoned now).
+   * @param client Pointer to the client connection
+   * @param minionID Minion type ID
+   * @return true if the item is used up
+   */
+  bool MinionConsumesItem(
+      const std::shared_ptr<channel::ChannelClientConnection>& client,
+      uint32_t minionID);
+
+  /**
+   * Put the statuses of an aura minion on the character and partner demon
+   * again (scheduled while the minion is out).
+   * @param client Pointer to the client connection
+   * @param entityID Entity ID of the minion
+   */
+  void MinionAura(
+      const std::shared_ptr<channel::ChannelClientConnection>& client,
+      int32_t entityID);
+
+  /**
+   * Return the minion when its time is up.
+   * @param client Pointer to the client connection
+   * @param entityID Entity ID of the minion
+   */
+  void MinionTimeUp(
+      const std::shared_ptr<channel::ChannelClientConnection>& client,
+      int32_t entityID);
+
+  /**
    * Summon the demon matching the supplied ID on the client's character.
    * @param client Pointer to the client connection containing
    *  the character

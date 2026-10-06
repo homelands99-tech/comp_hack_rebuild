@@ -590,6 +590,16 @@ class ChatManager {
       const std::list<libcomp::String>& args);
 
   /**
+   * GM command to summon or return a minion (data/minions.xml).
+   * @param client Pointer to the client that sent the command
+   * @param args List of arguments for the command
+   * @return true if the command was handled properly, else false
+   */
+  bool GMCommand_Minion(
+      const std::shared_ptr<channel::ChannelClientConnection>& client,
+      const std::list<libcomp::String>& args);
+
+  /**
    * GM command to have the client's character or partner demon
    * learn a skill.
    * @param client Pointer to the client that sent the command

@@ -910,6 +910,7 @@ void ZoneManager::LeaveZone(
 
   // The second demon (prototype) stays with the character only in one zone
   characterManager->DismissSubDemon(client);
+  characterManager->DismissMinion(client);
 
   // Cancel any active skills
   for (auto eState : {std::dynamic_pointer_cast<ActiveEntityState>(cState),
