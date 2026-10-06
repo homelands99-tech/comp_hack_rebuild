@@ -1994,7 +1994,9 @@ bool CharacterManager::SummonMinion(
     }
 
     if (eState->GetAIState()) {
+      // Companion logic only, no species script
       eState->GetAIState()->ClearActionOverrides();
+      eState->GetAIState()->SetScript(nullptr);
     }
   }
 
