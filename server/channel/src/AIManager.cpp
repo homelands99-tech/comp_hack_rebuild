@@ -76,7 +76,10 @@
 #define FOLLOW_DISTANCE_CLOSE (300.f)
 
 // Companions (a player's second demon) stay closer than normal followers
-#define FOLLOW_DISTANCE_COMPANION (450.f)
+#define FOLLOW_DISTANCE_COMPANION (300.f)
+
+// ...and walk up to this distance of the owner when catching up
+#define FOLLOW_DISTANCE_COMPANION_CLOSE (150.f)
 
 // ...and do not drift far from their owner during combat either
 #define FOLLOW_DISTANCE_COMPANION_COMBAT (1000.f)
@@ -1268,8 +1271,14 @@ bool AIManager::UpdateState(const std::shared_ptr<ActiveEntityState>& eState,
         auto server = mServer.lock();
         auto skillManager = server->GetSkillManager();
 
+        auto cmdSkillData =
+            activated ? activated->GetSkillData() : cmdSkill->GetSkillData();
+        bool reviving = cmdSkillData &&
+                        cmdSkillData->GetTarget()->GetType() ==
+                            objects::MiTargetData::Type_t::DEAD_ALLY;
+
         if (cmdSkill->GetTargetEntityID() > 0) {
-          if (!targetEntity || !targetEntity->IsAlive() ||
+          if (!targetEntity || (!targetEntity->IsAlive() && !reviving) ||
               targetEntity->GetAIIgnored()) {
             // Target invalid or dead, cancel the skill and move on
             if (activated) {
@@ -1722,7 +1731,9 @@ bool AIManager::Follow(const std::shared_ptr<ActiveEntityState>& eState,
       }
 
       // Pursue follow target
-      if (Chase(eState, followEntity->GetEntityID(), FOLLOW_DISTANCE_CLOSE)) {
+      if (Chase(eState, followEntity->GetEntityID(),
+                aiState->GetCompanion() ? FOLLOW_DISTANCE_COMPANION_CLOSE
+                                        : FOLLOW_DISTANCE_CLOSE)) {
         // Start following
         if (!aiState->IsFollowing()) {
           UpdateAggro(eState, -1);
@@ -1743,7 +1754,9 @@ bool AIManager::Follow(const std::shared_ptr<ActiveEntityState>& eState,
 
     if (followEntity) {
       Point src(followEntity->GetCurrentX(), followEntity->GetCurrentY());
-      Point target(src.x, src.y + FOLLOW_DISTANCE_CLOSE);
+      Point target(src.x, src.y + (aiState->GetCompanion()
+                                         ? FOLLOW_DISTANCE_COMPANION_CLOSE
+                                         : FOLLOW_DISTANCE_CLOSE));
 
       target = ZoneManager::RotatePoint(target, src,
                                         ZoneManager::GetRandomRotation());

@@ -1411,6 +1411,9 @@ void CharacterManager::MarkSubDemonDead(
   SendCompSlot(this, client, demon);
 }
 
+// The second demon moves this much faster than normal
+#define SUB_DEMON_MOVE_RATE (1.5)
+
 bool CharacterManager::SummonSubDemon(
     const std::shared_ptr<channel::ChannelClientConnection>& client,
     size_t slot, libcomp::String& error) {
@@ -1487,6 +1490,26 @@ bool CharacterManager::SummonSubDemon(
     if (traitID) {
       extension->InsertAddedSkills(traitID);
     }
+  }
+
+  // Species correction table with the demon's base stats, and a faster
+  // movement speed so the second demon can keep up
+  auto battleData = devilData->GetBattleData();
+  extension->SetOverrideStats(true);
+  for (size_t i = 0; i < 126; i++) {
+    extension->SetCorrectTbl(i, (int16_t)battleData->GetCorrect(i));
+  }
+
+  extension->SetCorrectTbl((size_t)CorrectTbl::STR, ds->GetSTR());
+  extension->SetCorrectTbl((size_t)CorrectTbl::MAGIC, ds->GetMAGIC());
+  extension->SetCorrectTbl((size_t)CorrectTbl::VIT, ds->GetVIT());
+  extension->SetCorrectTbl((size_t)CorrectTbl::INT, ds->GetINTEL());
+  extension->SetCorrectTbl((size_t)CorrectTbl::SPEED, ds->GetSPEED());
+  extension->SetCorrectTbl((size_t)CorrectTbl::LUCK, ds->GetLUCK());
+  for (auto move : {CorrectTbl::MOVE1, CorrectTbl::MOVE2}) {
+    extension->SetCorrectTbl(
+        (size_t)move,
+        (int16_t)(battleData->GetCorrect((size_t)move) * SUB_DEMON_MOVE_RATE));
   }
 
   eState->GetEnemyBase()->SetExtension(extension);
@@ -1653,6 +1676,18 @@ void CharacterManager::GrantSubDemonXP(
     acs->SetINTEL(ds->GetINTEL());
     acs->SetSPEED(ds->GetSPEED());
     acs->SetLUCK(ds->GetLUCK());
+
+    auto extension = ally->GetEnemyBase()
+                         ? ally->GetEnemyBase()->GetExtension()
+                         : nullptr;
+    if (extension && extension->GetOverrideStats()) {
+      extension->SetCorrectTbl((size_t)CorrectTbl::STR, ds->GetSTR());
+      extension->SetCorrectTbl((size_t)CorrectTbl::MAGIC, ds->GetMAGIC());
+      extension->SetCorrectTbl((size_t)CorrectTbl::VIT, ds->GetVIT());
+      extension->SetCorrectTbl((size_t)CorrectTbl::INT, ds->GetINTEL());
+      extension->SetCorrectTbl((size_t)CorrectTbl::SPEED, ds->GetSPEED());
+      extension->SetCorrectTbl((size_t)CorrectTbl::LUCK, ds->GetLUCK());
+    }
     ally->RecalculateStats(server->GetDefinitionManager());
 
     auto def = server->GetDefinitionManager()->GetDevilData(demon->GetType());
