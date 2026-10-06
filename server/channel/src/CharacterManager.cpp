@@ -2014,15 +2014,32 @@ bool CharacterManager::SummonMinion(
   // speed of a follower
   auto battleData = devilData->GetBattleData();
   auto extension = std::make_shared<objects::EnemyExtension>();
-  if (!def->GetSkills().empty()) {
+  {
+    // The type's skills, else the species' skills learned by this level
+    // (the enemy skill list lacks heals such as Dia for many demons)
+    auto growth = devilData->GetGrowth();
     extension->SetNoDefaultSkills(true);
-    for (uint32_t skillID : def->GetSkills()) {
-      if (skillID) {
-        extension->InsertAddedSkills(skillID);
+    if (!def->GetSkills().empty()) {
+      for (uint32_t skillID : def->GetSkills()) {
+        if (skillID) {
+          extension->InsertAddedSkills(skillID);
+        }
+      }
+    } else {
+      for (uint32_t skillID : growth->GetSkills()) {
+        if (skillID) {
+          extension->InsertAddedSkills(skillID);
+        }
+      }
+
+      for (auto acSkill : growth->GetAcquisitionSkills()) {
+        if (acSkill->GetID() && acSkill->GetLevel() <= (uint32_t)level) {
+          extension->InsertAddedSkills(acSkill->GetID());
+        }
       }
     }
 
-    for (uint32_t traitID : devilData->GetGrowth()->GetTraits()) {
+    for (uint32_t traitID : growth->GetTraits()) {
       if (traitID) {
         extension->InsertAddedSkills(traitID);
       }
