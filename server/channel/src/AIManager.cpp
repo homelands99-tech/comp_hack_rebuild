@@ -2404,7 +2404,7 @@ bool AIManager::UpdateCompanionSkill(
       now > activated->GetActivationTime() + COMPANION_SKILL_TIMEOUT) {
     // Owner gone or it took too long, drop the skill (checked first so a
     // skill stuck in any state cannot hold the companion forever)
-    LogAIManagerInfo([&]() {
+    LogAIManagerWarning([&]() {
       return libcomp::String("[sub] give up skill %1 (error %2, charging %3,"
                              " cmd %4)\n")
           .Arg(activated->GetSkillData()->GetCommon()->GetID())
@@ -2434,7 +2434,7 @@ bool AIManager::UpdateCompanionSkill(
   float dist = eState->GetDistance(owner);
   if (dist > range) {
     bool moving = Chase(eState, ownerID, range);
-    LogAIManagerInfo([&]() {
+    LogAIManagerWarning([&]() {
       return libcomp::String("[sub] skill %1 charged, owner too far %2 > %3,"
                              " chase %4 (canMove %5)\n")
           .Arg(skillData->GetCommon()->GetID())
@@ -2444,7 +2444,7 @@ bool AIManager::UpdateCompanionSkill(
           .Arg(eState->CanMove() ? "yes" : "no");
     });
   } else {
-    LogAIManagerInfo([&]() {
+    LogAIManagerWarning([&]() {
       return libcomp::String("[sub] execute skill %1 on owner (dist %2 <= %3,"
                              " last error %4)\n")
           .Arg(skillData->GetCommon()->GetID())
@@ -2540,7 +2540,7 @@ bool AIManager::PrepareCompanionSkill(
       float dist = eState->GetDistance(owner);
       if (dist > range) {
         bool moving = Chase(eState, owner->GetEntityID(), range);
-        LogAIManagerInfo([&]() {
+        LogAIManagerWarning([&]() {
           return libcomp::String("[sub] want skill %1, owner too far %2 > %3,"
                                  " chase %4 (canMove %5)\n")
               .Arg(skillData->GetCommon()->GetID())
@@ -2553,7 +2553,7 @@ bool AIManager::PrepareCompanionSkill(
       }
     }
 
-    LogAIManagerInfo([&]() {
+    LogAIManagerWarning([&]() {
       return libcomp::String("[sub] start skill %1 on %2\n")
           .Arg(skillData->GetCommon()->GetID())
           .Arg(targetID == owner->GetEntityID() ? "owner" : "self");
@@ -2569,12 +2569,33 @@ bool AIManager::PrepareCompanionSkill(
   if (hpRatio <= COMPANION_HEAL_RATIO &&
       now >= aiState->GetCompanionHealTime()) {
     auto skillData = pick(AI_SKILL_TYPE_HEAL);
+
+    // Diagnostic (prototype): what the companion has to heal with
+    LogAIManagerWarning([&]() {
+      libcomp::String ids;
+      for (auto& weight : skillMap[AI_SKILL_TYPE_HEAL]) {
+        ids += libcomp::String(" %1").Arg(weight.first->GetCommon()->GetID());
+      }
+
+      return libcomp::String("[sub] owner HP %1%%, heal skills:%2, picked %3,"
+                             " dist %4, canMove %5, activated %6\n")
+          .Arg((int32_t)(hpRatio * 100.f))
+          .Arg(ids.IsEmpty() ? libcomp::String(" none") : ids)
+          .Arg(skillData ? skillData->GetCommon()->GetID() : 0)
+          .Arg((int32_t)eState->GetDistance(owner))
+          .Arg(eState->CanMove() ? "yes" : "no")
+          .Arg(eState->GetActivatedAbility() ? "yes" : "no");
+    });
+
     if (skillData) {
       // Do not keep retrying right away if the heal does not work
       aiState->SetCompanionHealTime(now + COMPANION_HEAL_INTERVAL);
       queue(skillData);
       return true;
     }
+
+    // Nothing usable: check again a little later
+    aiState->SetCompanionHealTime(now + COMPANION_HEAL_INTERVAL);
   }
 
   if (owner->GetOpponentIDs().size() > 0 &&
