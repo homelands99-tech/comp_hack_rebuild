@@ -1314,9 +1314,21 @@ bool AIManager::UpdateState(const std::shared_ptr<ActiveEntityState>& eState,
           }
         } else {
           // Activate the skill
-          skillManager->ActivateSkill(
+          bool activatedOk = skillManager->ActivateSkill(
               eState, cmdSkill->GetSkillID(), cmdSkill->GetTargetEntityID(),
               cmdSkill->GetTargetEntityID(), ACTIVATION_TARGET);
+          if (!activatedOk && aiState->GetCompanion()) {
+            // Diagnostic (prototype)
+            LogAIManagerWarning([&]() {
+              auto t = targetEntity;
+              return libcomp::String("[sub] could not start skill %1 (target"
+                                     " %2, alive %3, dist %4)\n")
+                  .Arg(cmdSkill->GetSkillID())
+                  .Arg(cmdSkill->GetTargetEntityID())
+                  .Arg(t ? (t->IsAlive() ? "yes" : "no") : "none")
+                  .Arg(t ? (int32_t)eState->GetDistance(t) : -1);
+            });
+          }
         }
 
         aiState->PopCommand(cmdSkill);

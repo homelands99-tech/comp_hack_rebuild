@@ -1654,8 +1654,16 @@ int8_t SkillManager::ValidateSkillTarget(
             // accepted revival from others, or if it is a partner demon outside
             // of demon-only instances and it has been dead for less than the
             // revival lockout timer.
+            // A player's second demon (companion ally) may always revive its
+            // owner, like the player's own demon
+            bool companionOwner =
+                source->GetEntityType() == EntityType_t::ALLY &&
+                source->GetAIState() && source->GetAIState()->GetCompanion() &&
+                source->GetAIState()->GetFollowEntityID() ==
+                    target->GetEntityID();
+
             targetInvalid =
-                !targetClientState->GetAcceptRevival() &&
+                !companionOwner && !targetClientState->GetAcceptRevival() &&
                 (targetClientState->GetCharacterState() == target ||
                  (targetClientState->GetDemonState() == target &&
                   zone->GetInstanceType() == InstanceType_t::DEMON_ONLY));
