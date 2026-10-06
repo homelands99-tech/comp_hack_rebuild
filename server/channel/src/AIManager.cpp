@@ -2469,9 +2469,31 @@ bool AIManager::UpdateCompanionSkill(
   auto aiState = eState->GetAIState();
   auto activated = eState->GetActivatedAbility();
   int32_t ownerID = aiState->GetFollowEntityID();
-  if (!activated || ownerID <= 0 ||
-      (int32_t)activated->GetTargetObjectID() != ownerID) {
-    // Not a skill aimed at the owner, normal logic handles it
+  if (!activated || ownerID <= 0) {
+    return false;
+  }
+
+  // Skills aimed at the owner, or a heal the companion uses on itself
+  int32_t targetID = (int32_t)activated->GetTargetObjectID();
+  bool onOwner = targetID == ownerID;
+  bool onSelf = false;
+  if (!onOwner && targetID == eState->GetEntityID()) {
+    switch (activated->GetSkillData()
+                ->GetDamage()
+                ->GetBattleDamage()
+                ->GetFormula()) {
+      case objects::MiBattleDamageData::Formula_t::HEAL_NORMAL:
+      case objects::MiBattleDamageData::Formula_t::HEAL_STATIC:
+      case objects::MiBattleDamageData::Formula_t::HEAL_MAX_PERCENT:
+        onSelf = true;
+        break;
+      default:
+        break;
+    }
+  }
+
+  if (!onOwner && !onSelf) {
+    // Normal logic handles it
     return false;
   }
 
@@ -2480,7 +2502,7 @@ bool AIManager::UpdateCompanionSkill(
   auto owner = zone ? zone->GetActiveEntity(ownerID) : nullptr;
   bool reviveSkill = activated->GetSkillData()->GetTarget()->GetType() ==
                      objects::MiTargetData::Type_t::DEAD_ALLY;
-  if (!owner || owner->IsAlive() == reviveSkill ||
+  if ((onOwner && (!owner || owner->IsAlive() == reviveSkill)) ||
       now > activated->GetActivationTime() + COMPANION_SKILL_TIMEOUT) {
     // Owner gone or it took too long, drop the skill (checked first so a
     // skill stuck in any state cannot hold the companion forever)
@@ -2501,6 +2523,15 @@ bool AIManager::UpdateCompanionSkill(
        activated->GetErrorCode() == -1) ||
       eState->GetStatusTimes(STATUS_CHARGING)) {
     // Busy, executing or still charging
+    return true;
+  }
+
+  if (onSelf) {
+    LogAIManagerWarning([&]() {
+      return libcomp::String("[sub] execute skill %1 on self\n")
+          .Arg(activated->GetSkillData()->GetCommon()->GetID());
+    });
+    aiState->QueueCommand(std::make_shared<AIUseSkillCommand>(activated));
     return true;
   }
 
