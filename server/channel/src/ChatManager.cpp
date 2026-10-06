@@ -2204,8 +2204,8 @@ bool ChatManager::GMCommand_Help(
       {"sub",
        {"@sub list|SLOT|off",
         "Prototype: brings out the demon in COMP slot SLOT (1 based) as an",
-        "AI controlled ally that follows you. 'list' shows the COMP and",
-        "'off' removes it."}},
+        "AI controlled ally that follows you. 'list' shows the COMP,",
+        "'off' removes it and 'xp on|off' gives it experience too."}},
       {"scrap",
        {"@scrap SLOT [NAME]",
         "Removes the item in slot SLOT from the character's",
@@ -3314,6 +3314,19 @@ bool ChatManager::GMCommand_SubDemon(
                            characterManager->DismissSubDemon(client)
                                ? "2 体目を戻しました。"
                                : "2 体目は出ていません。");
+  }
+
+  if (arg == "xp") {
+    // Prototype switch: give experience to the second demon too
+    libcomp::String value = args.size() > 1 ? args.back().ToLower() : "";
+    if (value == "on" || value == "off") {
+      state->SetSubDemonXP(value == "on");
+    }
+
+    return SendChatMessage(client, ChatType_t::CHAT_SELF,
+                           state->GetSubDemonXP()
+                               ? "2 体目にも経験値が入ります（@sub xp off で止める）。"
+                               : "2 体目には経験値が入りません（@sub xp on で入る）。");
   }
 
   bool ok = false;

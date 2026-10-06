@@ -77,6 +77,12 @@
 // Companions (a player's second demon) stay closer than normal followers
 #define FOLLOW_DISTANCE_COMPANION (450.f)
 
+// Companions heal their owner at or below this HP ratio
+#define COMPANION_HEAL_RATIO (0.5f)
+
+// Companions use a support skill on their owner at most this often (us)
+#define COMPANION_SUPPORT_INTERVAL (30000000ULL)
+
 using namespace channel;
 
 std::unordered_map<std::string, std::shared_ptr<libhack::ScriptEngine>>
@@ -1363,7 +1369,12 @@ bool AIManager::UpdateEnemyState(
     }
 
     if (aiState->GetCompanion()) {
-      // Stay with the owner (see Follow)
+      // Stay with the owner (see Follow) but heal it when needed
+      if (eState->CanAct() && !aiState->GetCurrentCommand() &&
+          !eState->GetActivatedAbility()) {
+        PrepareCompanionSkill(eState, now);
+      }
+
       return false;
     }
 
@@ -1389,6 +1400,49 @@ bool AIManager::UpdateEnemyState(
       UpdateAggro(eState, -1);
       aiState->SetStatus(aiState->GetDefaultStatus());
       return false;
+    }
+  }
+
+  if (aiState->GetCompanion() && target) {
+    // Companions fight what their owner is fighting and stay near it
+    auto owner = zone->GetActiveEntity(aiState->GetFollowEntityID());
+    if (owner) {
+      owner->RefreshCurrentPosition(now);
+      std::shared_ptr<ActiveEntityState> best;
+      float bestDist = 0.f;
+      for (int32_t opponentID : owner->GetOpponentIDs()) {
+        auto o = zone->GetActiveEntity(opponentID);
+        if (!o || !o->IsAlive() || !o->Ready() || o->GetAIIgnored() ||
+            eState->SameFaction(o)) {
+          continue;
+        }
+
+        o->RefreshCurrentPosition(now);
+        if (o->GetDistance(owner) > FOLLOW_DISTANCE_MAX) {
+          continue;
+        }
+
+        if (o == target) {
+          best = nullptr;  // Already on one of the owner's opponents
+          break;
+        }
+
+        float d = eState->GetDistance(o);
+        if (!best || d < bestDist) {
+          best = o;
+          bestDist = d;
+        }
+      }
+
+      if (best) {
+        UpdateAggro(eState, best->GetEntityID());
+        target = best;
+      } else if (target->GetDistance(owner) > FOLLOW_DISTANCE_MAX) {
+        // Do not chase enemies far away from the owner
+        UpdateAggro(eState, -1);
+        aiState->SetStatus(aiState->GetDefaultStatus());
+        return false;
+      }
     }
   }
 
@@ -2317,6 +2371,77 @@ bool AIManager::CanRetrySkill(
   return false;
 }
 
+bool AIManager::PrepareCompanionSkill(
+    const std::shared_ptr<ActiveEntityState>& eState, uint64_t now) {
+  auto aiState = eState->GetAIState();
+  auto zone = eState->GetZone();
+  auto owner = zone ? zone->GetActiveEntity(aiState->GetFollowEntityID())
+                    : nullptr;
+  if (!owner || !owner->IsAlive() || !owner->Ready()) {
+    return false;
+  }
+
+  RefreshSkillMap(eState, aiState);
+  auto skillMap = aiState->GetSkillMap();
+  auto skillManager = mServer.lock()->GetSkillManager();
+
+  // Pick a usable skill of the type, preferring ones that target an ally
+  auto pick = [&](uint16_t type) -> std::shared_ptr<objects::MiSkillData> {
+    std::list<std::shared_ptr<objects::MiSkillData>> usable;
+    for (auto& weight : skillMap[type]) {
+      auto skillData = weight.first;
+      if (!eState->SkillCooldownsKeyExists(
+              skillData->GetBasic()->GetCooldownID()) &&
+          !skillManager->SkillRestricted(eState, skillData)) {
+        usable.push_back(skillData);
+      }
+    }
+
+    return usable.size() > 0 ? libcomp::Randomizer::GetEntry(usable)
+                             : nullptr;
+  };
+
+  auto queue = [&](const std::shared_ptr<objects::MiSkillData>& skillData) {
+    int32_t targetID = eState->GetEntityID();
+    switch (skillData->GetTarget()->GetType()) {
+      case objects::MiTargetData::Type_t::ALLY:
+      case objects::MiTargetData::Type_t::ALLY_PLAYER:
+      case objects::MiTargetData::Type_t::PARTY:
+        targetID = owner->GetEntityID();
+        break;
+      default:
+        break;
+    }
+
+    aiState->QueueCommand(
+        std::make_shared<AIUseSkillCommand>(skillData, targetID));
+  };
+
+  float hpRatio =
+      owner->GetMaxHP() > 0
+          ? (float)owner->GetCoreStats()->GetHP() / (float)owner->GetMaxHP()
+          : 1.f;
+  if (hpRatio <= COMPANION_HEAL_RATIO) {
+    auto skillData = pick(AI_SKILL_TYPE_HEAL);
+    if (skillData) {
+      queue(skillData);
+      return true;
+    }
+  }
+
+  if (owner->GetOpponentIDs().size() > 0 &&
+      now >= aiState->GetCompanionSupportTime()) {
+    auto skillData = pick(AI_SKILL_TYPE_SUPPORT);
+    if (skillData) {
+      aiState->SetCompanionSupportTime(now + COMPANION_SUPPORT_INTERVAL);
+      queue(skillData);
+      return true;
+    }
+  }
+
+  return false;
+}
+
 bool AIManager::PrepareSkillUsage(
     const std::shared_ptr<ActiveEntityState>& eState) {
   auto zone = eState->GetZone();
@@ -2352,6 +2477,11 @@ bool AIManager::PrepareSkillUsage(
   if (!aiState->GetNormalSkillUse()) {
     // Do not select a skill via normal logic
     return false;
+  }
+
+  if (aiState->GetCompanion() &&
+      PrepareCompanionSkill(eState, ChannelServer::GetServerTime())) {
+    return true;
   }
 
   auto skillMap = aiState->GetSkillMap();

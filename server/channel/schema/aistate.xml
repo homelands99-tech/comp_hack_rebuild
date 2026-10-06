@@ -30,6 +30,7 @@
         <member type="bool" name="SkillsMapped"/>
         <member type="bool" name="DespawnWhenLost" default="true"/>
         <member type="bool" name="Companion"/>
+        <member type="u64" name="CompanionSupportTime"/>
         <member type="bool" name="IgnoreDeaggroMin"/>
         <member type="bool" name="IgnoreDeaggroMax"/>
         <member type="bool" name="IgnoreEstoma"/>

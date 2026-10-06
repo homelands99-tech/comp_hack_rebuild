@@ -310,7 +310,18 @@ class CharacterManager {
    * @return true if one was removed
    */
   bool DismissSubDemon(
-      const std::shared_ptr<channel::ChannelClientConnection>& client);
+      const std::shared_ptr<channel::ChannelClientConnection>& client,
+      int32_t onlyEntityID = 0);
+
+  /**
+   * Give experience to the COMP demon used as the client's second demon
+   * (prototype, only when ClientState SubDemonXP is on).
+   * @param client Pointer to the client connection
+   * @param xp Experience to add
+   */
+  void GrantSubDemonXP(
+      const std::shared_ptr<channel::ChannelClientConnection>& client,
+      int64_t xp);
 
   /**
    * Summon the demon matching the supplied ID on the client's character.

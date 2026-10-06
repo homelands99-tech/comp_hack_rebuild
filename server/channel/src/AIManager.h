@@ -317,6 +317,16 @@ class AIManager {
   bool Follow(const std::shared_ptr<ActiveEntityState>& eState, uint64_t now);
 
   /**
+   * For a companion (a player's second demon): queue a heal skill on the
+   * owner when its HP is low, or a support skill on it during combat.
+   * @param eState Pointer to the companion entity state
+   * @param now Current server time
+   * @return true if a skill was queued
+   */
+  bool PrepareCompanionSkill(const std::shared_ptr<ActiveEntityState>& eState,
+                             uint64_t now);
+
+  /**
    * Set the entity's destination position based on the supplied
    * values and uses the current position values to set the origin.
    * Communicating that the move has taken place must be done elsewhere.

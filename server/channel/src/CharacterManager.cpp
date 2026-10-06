@@ -1448,8 +1448,17 @@ bool CharacterManager::SummonSubDemon(
   stats->SetSPEED(ds->GetSPEED());
   stats->SetLUCK(ds->GetLUCK());
   eState->RecalculateStats(definitionManager);
-  stats->SetHP(eState->GetMaxHP());
-  stats->SetMP(eState->GetMaxMP());
+
+  // Start with the same HP/MP ratio as the demon in the COMP
+  auto ratio = [](int32_t cur, int32_t max) {
+    return max > 0 ? std::min(1.0, std::max(0.0, (double)cur / (double)max))
+                   : 1.0;
+  };
+  stats->SetHP(std::max(1, (int32_t)std::round(
+                               eState->GetMaxHP() *
+                               ratio(ds->GetHP(), ds->GetMaxHP()))));
+  stats->SetMP((int32_t)std::round(eState->GetMaxMP() *
+                                   ratio(ds->GetMP(), ds->GetMaxMP())));
 
   std::list<std::shared_ptr<ActiveEntityState>> eStates = {eState};
   std::list<std::shared_ptr<objects::Action>> noActions;
@@ -1481,17 +1490,45 @@ bool CharacterManager::SummonSubDemon(
 }
 
 bool CharacterManager::DismissSubDemon(
-    const std::shared_ptr<channel::ChannelClientConnection>& client) {
+    const std::shared_ptr<channel::ChannelClientConnection>& client,
+    int32_t onlyEntityID) {
   auto state = client->GetClientState();
   int32_t entityID = state->GetSubDemonEntityID();
-  state->SetSubDemonEntityID(0);
-  state->SetSubDemonID(0);
-  if (!entityID) {
+  if (!entityID || (onlyEntityID && entityID != onlyEntityID)) {
     return false;
   }
 
+  auto demon = std::dynamic_pointer_cast<objects::Demon>(
+      libcomp::PersistentObject::GetObjectByUUID(
+          state->GetObjectUUID(state->GetSubDemonID())));
+  state->SetSubDemonEntityID(0);
+  state->SetSubDemonID(0);
+
   auto zone = state->GetCharacterState()->GetZone();
-  if (zone && zone->GetActiveEntity(entityID)) {
+  auto ally = zone ? zone->GetActiveEntity(entityID) : nullptr;
+
+  // Write the HP/MP ratio back to the demon in the COMP (0 if it died)
+  auto ds = demon ? demon->GetCoreStats().Get() : nullptr;
+  if (ally && ds) {
+    auto acs = ally->GetCoreStats();
+    int32_t hp = 0, mp = 0;
+    if (ally->IsAlive() && ally->GetMaxHP() > 0) {
+      hp = std::max(1, (int32_t)std::round((double)ds->GetMaxHP() *
+                                           (double)acs->GetHP() /
+                                           (double)ally->GetMaxHP()));
+    }
+
+    if (ally->GetMaxMP() > 0) {
+      mp = (int32_t)std::round((double)ds->GetMaxMP() * (double)acs->GetMP() /
+                               (double)ally->GetMaxMP());
+    }
+
+    ds->SetHP(std::min(hp, (int32_t)ds->GetMaxHP()));
+    ds->SetMP(std::min(mp, (int32_t)ds->GetMaxMP()));
+    mServer.lock()->GetWorldDatabase()->QueueUpdate(ds, state->GetAccountUID());
+  }
+
+  if (ally) {
     zone->RemoveEntity(entityID);
     // Same removal as storing the partner demon (2)
     mServer.lock()->GetZoneManager()->RemoveEntitiesFromZone(zone, {entityID},
@@ -1499,6 +1536,71 @@ bool CharacterManager::DismissSubDemon(
   }
 
   return true;
+}
+
+void CharacterManager::GrantSubDemonXP(
+    const std::shared_ptr<channel::ChannelClientConnection>& client,
+    int64_t xp) {
+  auto state = client->GetClientState();
+  int32_t entityID = state->GetSubDemonEntityID();
+  auto zone = state->GetCharacterState()->GetZone();
+  auto ally = (entityID && zone) ? zone->GetActiveEntity(entityID) : nullptr;
+  if (!state->GetSubDemonXP() || !ally || !ally->IsAlive() || xp <= 0) {
+    return;
+  }
+
+  auto demon = std::dynamic_pointer_cast<objects::Demon>(
+      libcomp::PersistentObject::GetObjectByUUID(
+          state->GetObjectUUID(state->GetSubDemonID())));
+  auto ds = demon ? demon->GetCoreStats().Get() : nullptr;
+  if (!ds) {
+    return;
+  }
+
+  // Demons use the world level cap (99 at most)
+  int8_t cap = mServer.lock()->GetWorldSharedConfig()->GetLevelCap();
+  int8_t level = ds->GetLevel();
+  if (level >= cap) {
+    return;
+  }
+
+  int64_t current = ds->GetXP() + xp;
+  while (level < cap &&
+         current >= (int64_t)libhack::LEVEL_XP_REQUIREMENTS[(size_t)level]) {
+    current -= (int64_t)libhack::LEVEL_XP_REQUIREMENTS[(size_t)level++];
+  }
+
+  if (level == cap) {
+    current = 0;
+  }
+
+  ds->SetXP(current);
+
+  auto server = mServer.lock();
+  if (level > ds->GetLevel()) {
+    ds->SetLevel(level);
+    CalculateDemonBaseStats(demon, nullptr, nullptr, false);
+
+    // The ally keeps fighting with the new level
+    auto acs = ally->GetCoreStats();
+    acs->SetLevel(level);
+    acs->SetSTR(ds->GetSTR());
+    acs->SetMAGIC(ds->GetMAGIC());
+    acs->SetVIT(ds->GetVIT());
+    acs->SetINTEL(ds->GetINTEL());
+    acs->SetSPEED(ds->GetSPEED());
+    acs->SetLUCK(ds->GetLUCK());
+    ally->RecalculateStats(server->GetDefinitionManager());
+
+    auto def = server->GetDefinitionManager()->GetDevilData(demon->GetType());
+    server->GetChatManager()->SendChatMessage(
+        client, ChatType_t::CHAT_SELF,
+        libcomp::String("2 体目の %1 が Lv%2 になりました。")
+            .Arg(def ? def->GetBasic()->GetName() : libcomp::String("?"))
+            .Arg((int32_t)level));
+  }
+
+  server->GetWorldDatabase()->QueueUpdate(ds, state->GetAccountUID());
 }
 
 void CharacterManager::SummonDemon(

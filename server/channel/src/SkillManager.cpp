@@ -138,6 +138,7 @@
 #include "ActionManager.h"
 #include "ChannelServer.h"
 #include "CharacterManager.h"
+#include "AIState.h"
 #include "ChatManager.h"
 #include "EventManager.h"
 #include "ManagerConnection.h"
@@ -4140,6 +4141,13 @@ void SkillManager::ProcessSkillResultFinal(
           // race drop rule
           auto sourceState =
               ClientState::GetEntityClientState(source->GetEntityID());
+          if (!sourceState && source->GetEntityType() == EntityType_t::ALLY &&
+              source->GetAIState() && source->GetAIState()->GetCompanion()) {
+            // A player's second demon: count it for the owner
+            sourceState = ClientState::GetEntityClientState(
+                source->GetAIState()->GetFollowEntityID());
+          }
+
           if (sourceState) {
             auto worldCID = sourceState->GetWorldCID();
 
@@ -6430,6 +6438,22 @@ void SkillManager::HandleKills(
       case EntityType_t::ENEMY:
       case EntityType_t::ALLY:
         enemiesKilled.push_back(entity);
+        if (entity->GetAIState() && entity->GetAIState()->GetCompanion()) {
+          // A player's second demon: return it to the COMP (HP 0) shortly
+          auto ownerClient = managerConnection->GetEntityClient(
+              entity->GetAIState()->GetFollowEntityID());
+          if (ownerClient) {
+            server->ScheduleWork(
+                (channel::ServerTime)(ChannelServer::GetServerTime() +
+                                      5000000ULL),
+                [](CharacterManager* pManager,
+                   std::shared_ptr<ChannelClientConnection> pClient,
+                   int32_t pEntityID) {
+                  pManager->DismissSubDemon(pClient, pEntityID);
+                },
+                characterManager, ownerClient, entity->GetEntityID());
+          }
+        }
         break;
       default:
         break;
@@ -7142,6 +7166,9 @@ void SkillManager::HandleKillXP(const std::shared_ptr<objects::Enemy>& enemy,
         }
       }
     }
+
+    // The second demon (prototype, @sub xp on)
+    characterManager->GrantSubDemonXP(c, xpPair.second);
   }
 }
 
