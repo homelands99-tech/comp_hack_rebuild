@@ -1370,7 +1370,7 @@ bool AIManager::UpdateState(const std::shared_ptr<ActiveEntityState>& eState,
               cmdSkill->GetTargetEntityID(), ACTIVATION_TARGET);
           if (!activatedOk && aiState->GetCompanion()) {
             // Diagnostic (prototype)
-            LogAIManagerWarning([&]() {
+            LogAIManagerDebug([&]() {
               auto t = targetEntity;
               return libcomp::String("[sub] could not start skill %1 (target"
                                      " %2, alive %3, dist %4)\n")
@@ -1549,7 +1549,7 @@ bool AIManager::UpdateEnemyState(
       }
 
       if (best) {
-        LogAIManagerWarning([&]() {
+        LogAIManagerDebug([&]() {
           return libcomp::String("[sub] switch to the owner's enemy (dist %1)\n")
               .Arg((int32_t)bestDist);
         });
@@ -1557,7 +1557,7 @@ bool AIManager::UpdateEnemyState(
         target = best;
       } else if (target->GetDistance(owner) > FOLLOW_DISTANCE_MAX) {
         // Do not chase enemies far away from the owner
-        LogAIManagerWarning([&]() {
+        LogAIManagerDebug([&]() {
           return libcomp::String("[sub] drop target far from the owner\n");
         });
         UpdateAggro(eState, -1);
@@ -1723,11 +1723,11 @@ bool AIManager::UpdateEnemyState(
   } else {
     uint32_t waitTime = 0;
 
-    // Diagnostic (prototype): why a companion is not acting, at most every 2s
+    // Diagnostic (debug log): why a companion is not acting, at most every 2s
     auto companionLog = [&](const libcomp::String& why) {
       if (aiState->GetCompanion() && now >= aiState->GetCompanionLogTime()) {
         aiState->SetCompanionLogTime(now + 2000000ULL);
-        LogAIManagerWarning([&]() {
+        LogAIManagerDebug([&]() {
           return libcomp::String("[sub] combat: %1 (target dist %2, skills %3)\n")
               .Arg(why)
               .Arg((int32_t)targetDist)
@@ -1813,7 +1813,7 @@ bool AIManager::Follow(const std::shared_ptr<ActiveEntityState>& eState,
                                        : FOLLOW_DISTANCE_FAR);
     if (eState->GetDistance(followEntity) > maxDistance) {
       if (aiState->GetCompanion() && !aiState->IsFollowing()) {
-        LogAIManagerWarning([&]() {
+        LogAIManagerDebug([&]() {
           return libcomp::String("[sub] follow owner: dist %1 > %2 (status %3)\n")
               .Arg((int32_t)eState->GetDistance(followEntity))
               .Arg((int32_t)maxDistance)
@@ -2232,7 +2232,7 @@ std::shared_ptr<ActiveEntityState> AIManager::Retarget(
 
     if (possibleTargets.size() > 0 &&
         (aiState->IsFollowing() || aiState->IsWandering())) {
-      LogAIManagerWarning([&]() {
+      LogAIManagerDebug([&]() {
         return libcomp::String("[sub] owner is fighting %1 enemies, going after"
                                " one\n")
             .Arg((uint32_t)possibleTargets.size());
@@ -2701,7 +2701,7 @@ bool AIManager::UpdateCompanionSkill(
       now > activated->GetActivationTime() + COMPANION_SKILL_TIMEOUT) {
     // Owner gone or it took too long, drop the skill (checked first so a
     // skill stuck in any state cannot hold the companion forever)
-    LogAIManagerWarning([&]() {
+    LogAIManagerDebug([&]() {
       return libcomp::String("[sub] give up skill %1 (error %2, charging %3,"
                              " cmd %4)\n")
           .Arg(activated->GetSkillData()->GetCommon()->GetID())
@@ -2722,7 +2722,7 @@ bool AIManager::UpdateCompanionSkill(
   }
 
   if (onSelf) {
-    LogAIManagerWarning([&]() {
+    LogAIManagerDebug([&]() {
       return libcomp::String("[sub] execute skill %1 on self\n")
           .Arg(activated->GetSkillData()->GetCommon()->GetID());
     });
@@ -2740,7 +2740,7 @@ bool AIManager::UpdateCompanionSkill(
   float dist = eState->GetDistance(owner);
   if (dist > range) {
     bool moving = !COMPANION_FLAG("Stay") && Chase(eState, ownerID, range);
-    LogAIManagerWarning([&]() {
+    LogAIManagerDebug([&]() {
       return libcomp::String("[sub] skill %1 charged, owner too far %2 > %3,"
                              " chase %4 (canMove %5)\n")
           .Arg(skillData->GetCommon()->GetID())
@@ -2750,7 +2750,7 @@ bool AIManager::UpdateCompanionSkill(
           .Arg(eState->CanMove() ? "yes" : "no");
     });
   } else {
-    LogAIManagerWarning([&]() {
+    LogAIManagerDebug([&]() {
       return libcomp::String("[sub] execute skill %1 on owner (dist %2 <= %3,"
                              " last error %4)\n")
           .Arg(skillData->GetCommon()->GetID())
@@ -2860,7 +2860,7 @@ bool AIManager::PrepareCompanionSkill(
       if (dist > range) {
         bool moving =
             !COMPANION_FLAG("Stay") && Chase(eState, owner->GetEntityID(), range);
-        LogAIManagerWarning([&]() {
+        LogAIManagerDebug([&]() {
           return libcomp::String("[sub] want skill %1, owner too far %2 > %3,"
                                  " chase %4 (canMove %5)\n")
               .Arg(skillData->GetCommon()->GetID())
@@ -2873,7 +2873,7 @@ bool AIManager::PrepareCompanionSkill(
       }
     }
 
-    LogAIManagerWarning([&]() {
+    LogAIManagerDebug([&]() {
       return libcomp::String("[sub] start skill %1 on %2\n")
           .Arg(skillData->GetCommon()->GetID())
           .Arg(targetID == owner->GetEntityID() ? "owner" : "self");
@@ -2905,7 +2905,7 @@ bool AIManager::PrepareCompanionSkill(
       }
     }
 
-    LogAIManagerWarning([&]() {
+    LogAIManagerDebug([&]() {
       return libcomp::String("[sub] owner is dead, revive skills usable: %1\n")
           .Arg((uint32_t)revives.size());
     });
@@ -2926,8 +2926,8 @@ bool AIManager::PrepareCompanionSkill(
       now >= aiState->GetCompanionHealTime()) {
     auto skillData = pick(AI_SKILL_TYPE_HEAL);
 
-    // Diagnostic (prototype): what the companion has to heal with
-    LogAIManagerWarning([&]() {
+    // Diagnostic (debug log): what the companion has to heal with
+    LogAIManagerDebug([&]() {
       libcomp::String ids;
       for (auto& weight : skillMap[AI_SKILL_TYPE_HEAL]) {
         ids += libcomp::String(" %1").Arg(weight.first->GetCommon()->GetID());
