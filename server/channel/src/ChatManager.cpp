@@ -2205,7 +2205,7 @@ bool ChatManager::GMCommand_Help(
         "by ID if no RANK specified."}},
       {"sub",
        {"@sub list|SLOT|off",
-        "Prototype: brings out the demon in COMP slot SLOT (1 based) as an",
+        "Brings out the demon in COMP slot SLOT (1 based) as an",
         "AI controlled ally that follows you. 'list' shows the COMP,",
         "'off' removes it and 'xp on|off' gives it experience too."}},
       {"scrap",
@@ -3280,6 +3280,12 @@ bool ChatManager::GMCommand_SubDemon(
   auto comp = character ? character->GetCOMP().Get() : nullptr;
   if (!comp) {
     return true;
+  }
+
+  if (!SVR_CONST.SUB_DEMON_ENABLED) {
+    return SendChatMessage(
+        client, ChatType_t::CHAT_SELF,
+        server->GetCustomMessage("SUB_DEMON_DISABLED", "2 体目は使えません。"));
   }
 
   libcomp::String arg = args.empty() ? "" : args.front().ToLower();

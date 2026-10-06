@@ -1315,7 +1315,9 @@ bool AIManager::UpdateState(const std::shared_ptr<ActiveEntityState>& eState,
 
         auto cmdSkillData =
             activated ? activated->GetSkillData() : cmdSkill->GetSkillData();
-        bool reviving = cmdSkillData &&
+        // Only a companion (second demon) keeps revival skills aimed at a
+        // dead target; other AI behave as before
+        bool reviving = aiState->GetCompanion() && cmdSkillData &&
                         cmdSkillData->GetTarget()->GetType() ==
                             objects::MiTargetData::Type_t::DEAD_ALLY;
 
@@ -1369,7 +1371,7 @@ bool AIManager::UpdateState(const std::shared_ptr<ActiveEntityState>& eState,
               eState, cmdSkill->GetSkillID(), cmdSkill->GetTargetEntityID(),
               cmdSkill->GetTargetEntityID(), ACTIVATION_TARGET);
           if (!activatedOk && aiState->GetCompanion()) {
-            // Diagnostic (prototype)
+            // Diagnostic
             LogAIManagerDebug([&]() {
               auto t = targetEntity;
               return libcomp::String("[sub] could not start skill %1 (target"

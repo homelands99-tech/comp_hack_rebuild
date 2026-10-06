@@ -291,7 +291,7 @@ class CharacterManager {
   void SendAutoRecovery(const std::shared_ptr<ChannelClientConnection>& client);
 
   /**
-   * Prototype: bring out a second demon from the COMP as an AI controlled
+   * Bring out a second demon from the COMP as an AI controlled
    * ally that follows the character and fights on its own. It copies the
    * demon's level and base stats. Only one second demon at a time; it is
    * removed when the character leaves the zone or summons that demon.
@@ -366,7 +366,7 @@ class CharacterManager {
 
   /**
    * Give experience to the COMP demon used as the client's second demon
-   * (prototype, only when ClientState SubDemonXP is on).
+   * (only when ClientState SubDemonXP is on).
    * @param client Pointer to the client connection
    * @param xp Experience to add
    */

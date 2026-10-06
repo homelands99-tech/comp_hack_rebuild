@@ -1574,6 +1574,14 @@ bool CharacterManager::SummonSubDemon(
   auto character = cState->GetEntity();
   auto zone = cState->GetZone();
   auto comp = character ? character->GetCOMP().Get() : nullptr;
+  if (!SVR_CONST.SUB_DEMON_ENABLED) {
+    // Also covers the GM command so the feature stays off without the
+    // constant
+    error = mServer.lock()->GetCustomMessage("SUB_DEMON_DISABLED",
+                                             "2 体目は使えません。");
+    return false;
+  }
+
   if (!zone || !comp) {
     error = mServer.lock()->GetCustomMessage("SUB_DEMON_NO_ZONE", "ゾーンか COMP が見つかりません。");
     return false;
@@ -1623,13 +1631,26 @@ bool CharacterManager::SummonSubDemon(
   }
 
   // The second demon's own AI script (scripts/AI/ai_subdemon.nut) holds its
-  // behaviour settings. Without it the defaults are used.
+  // behaviour settings. Without it the defaults are used (checked first so
+  // a missing script does not log an error on every summon).
   auto aiManager = server->GetAIManager();
-  if (!aiManager->Prepare(eState, SUB_DEMON_AI_SCRIPT)) {
-    LogGeneralWarningMsg("Second demon AI script 'subDemon' not found, using"
+  bool hasScript =
+      server->GetServerDataManager()->GetAIScript(SUB_DEMON_AI_SCRIPT) !=
+      nullptr;
+  if (!hasScript || !aiManager->Prepare(eState, SUB_DEMON_AI_SCRIPT)) {
+    if (!hasScript) {
+      LogGeneralDebugMsg("Second demon AI script 'subDemon' not found, using"
                          " the default settings\n");
+      aiManager->Prepare(eState, "");
+    } else {
+      LogGeneralWarningMsg("Second demon AI script 'subDemon' failed to"
+                           " prepare, using the default settings\n");
+    }
+
     if (eState->GetAIState()) {
+      // Companion logic only, no species script
       eState->GetAIState()->ClearActionOverrides();
+      eState->GetAIState()->SetScript(nullptr);
     }
   }
 
@@ -1951,13 +1972,26 @@ bool CharacterManager::SummonMinion(
   libcomp::String script =
       def->GetAIScript().IsEmpty() ? SUB_DEMON_AI_SCRIPT : def->GetAIScript();
   auto aiManager = server->GetAIManager();
-  if (!aiManager->Prepare(eState, script)) {
-    LogGeneralWarning([&]() {
-      return libcomp::String(
-                 "Minion %1: AI script '%2' not found, using the defaults\n")
-          .Arg(minionID)
-          .Arg(script);
-    });
+  bool hasScript =
+      server->GetServerDataManager()->GetAIScript(script) != nullptr;
+  if (!hasScript || !aiManager->Prepare(eState, script)) {
+    if (!hasScript) {
+      LogGeneralDebug([&]() {
+        return libcomp::String(
+                   "Minion %1: AI script '%2' not found, using the defaults\n")
+            .Arg(minionID)
+            .Arg(script);
+      });
+      aiManager->Prepare(eState, "");
+    } else {
+      LogGeneralWarning([&]() {
+        return libcomp::String(
+                   "Minion %1: AI script '%2' failed to prepare, using the"
+                   " defaults\n")
+            .Arg(minionID)
+            .Arg(script);
+      });
+    }
 
     if (eState->GetAIState()) {
       eState->GetAIState()->ClearActionOverrides();

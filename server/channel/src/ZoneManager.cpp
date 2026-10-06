@@ -883,16 +883,20 @@ bool ZoneManager::EnterZone(
   server->GetManagerConnection()->GetWorldConnection()->SendPacket(request);
 
   // The second demon comes back a moment after entering the zone (auto)
-  server->ScheduleWork(
-      (channel::ServerTime)(ChannelServer::GetServerTime() + 2000000ULL),
-      [](CharacterManager* pManager,
-         std::shared_ptr<ChannelClientConnection> pClient, uint32_t pZoneID) {
-        auto pZone = pClient->GetClientState()->GetCharacterState()->GetZone();
-        if (pZone && pZone->GetDefinitionID() == pZoneID) {
-          pManager->AutoSummonSubDemon(pClient);
-        }
-      },
-      server->GetCharacterManager(), client, zoneID);
+  if (SVR_CONST.SUB_DEMON_ENABLED) {
+    server->ScheduleWork(
+        (channel::ServerTime)(ChannelServer::GetServerTime() + 2000000ULL),
+        [](CharacterManager* pManager,
+           std::shared_ptr<ChannelClientConnection> pClient,
+           uint32_t pZoneID) {
+          auto pZone =
+              pClient->GetClientState()->GetCharacterState()->GetZone();
+          if (pZone && pZone->GetDefinitionID() == pZoneID) {
+            pManager->AutoSummonSubDemon(pClient);
+          }
+        },
+        server->GetCharacterManager(), client, zoneID);
+  }
 
   return true;
 }
