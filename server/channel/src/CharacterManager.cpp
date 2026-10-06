@@ -1432,16 +1432,20 @@ bool CharacterManager::SummonSubDemon(
 
   std::list<std::shared_ptr<ActiveEntityState>> eStates = {eState};
   std::list<std::shared_ptr<objects::Action>> noActions;
-  if (!zoneManager->AddEnemiesToZone(eStates, zone, false, false, noActions)) {
+  // Appear with the partner demon summon graphic (2)
+  if (!zoneManager->AddEnemiesToZone(eStates, zone, false, false, noActions,
+                                     2)) {
     error = "味方 NPC をゾーンに出せませんでした。";
     return false;
   }
 
-  // Follow the character
+  // Follow the character and help with its opponents (AI "companion")
   auto aiState = eState->GetAIState();
   if (aiState) {
     aiState->SetFollowEntityID(cState->GetEntityID());
     aiState->SetDespawnWhenLost(false);
+    aiState->SetCompanion(true);
+    aiState->SetStatus(AIStatus_t::WANDERING, true);
   }
 
   state->SetSubDemonEntityID(eState->GetEntityID());
@@ -1463,7 +1467,9 @@ bool CharacterManager::DismissSubDemon(
   auto zone = state->GetCharacterState()->GetZone();
   if (zone && zone->GetActiveEntity(entityID)) {
     zone->RemoveEntity(entityID);
-    mServer.lock()->GetZoneManager()->RemoveEntitiesFromZone(zone, {entityID});
+    // Same removal as storing the partner demon (2)
+    mServer.lock()->GetZoneManager()->RemoveEntitiesFromZone(zone, {entityID},
+                                                             2);
   }
 
   return true;

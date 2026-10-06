@@ -74,6 +74,9 @@
 #define FOLLOW_DISTANCE_FAR (MAX_ENTITY_DRAW_DISTANCE * 0.25f)
 #define FOLLOW_DISTANCE_CLOSE (300.f)
 
+// Companions (a player's second demon) stay closer than normal followers
+#define FOLLOW_DISTANCE_COMPANION (450.f)
+
 using namespace channel;
 
 std::unordered_map<std::string, std::shared_ptr<libhack::ScriptEngine>>
@@ -1359,6 +1362,11 @@ bool AIManager::UpdateEnemyState(
       return false;
     }
 
+    if (aiState->GetCompanion()) {
+      // Stay with the owner (see Follow)
+      return false;
+    }
+
     Wander(eState, eBase);
     return true;
   }
@@ -1599,7 +1607,10 @@ bool AIManager::Follow(const std::shared_ptr<ActiveEntityState>& eState,
     followEntity->RefreshCurrentPosition(now);
 
     float maxDistance =
-        aiState->IsAggro() ? FOLLOW_DISTANCE_MAX : FOLLOW_DISTANCE_FAR;
+        aiState->IsAggro()
+            ? FOLLOW_DISTANCE_MAX
+            : (aiState->GetCompanion() ? FOLLOW_DISTANCE_COMPANION
+                                       : FOLLOW_DISTANCE_FAR);
     if (eState->GetDistance(followEntity) > maxDistance) {
       // Pursue follow target
       if (Chase(eState, followEntity->GetEntityID(), FOLLOW_DISTANCE_CLOSE)) {
@@ -1867,7 +1878,26 @@ std::shared_ptr<ActiveEntityState> AIManager::Retarget(
 
   auto opponentIDs = eState->GetOpponentIDs();
   std::list<std::shared_ptr<ActiveEntityState>> possibleTargets;
-  if (opponentIDs.size() > 0) {
+  auto owner = aiState->GetCompanion()
+                   ? zone->GetActiveEntity(aiState->GetFollowEntityID())
+                   : nullptr;
+  if (owner && opponentIDs.size() == 0) {
+    // Companion not in combat yet: help with the owner's opponents only so
+    // it does not pull enemies by itself
+    for (int32_t opponentID : owner->GetOpponentIDs()) {
+      auto entity = zone->GetActiveEntity(opponentID);
+      if (entity && entity->IsAlive() && entity->Ready() &&
+          !entity->GetAIIgnored() && !eState->SameFaction(entity)) {
+        entity->RefreshCurrentPosition(now);
+        possibleTargets.push_back(entity);
+      }
+    }
+
+    if (possibleTargets.size() > 0 &&
+        (aiState->IsFollowing() || aiState->IsWandering())) {
+      aiState->SetStatus(AIStatus_t::AGGRO);
+    }
+  } else if (opponentIDs.size() > 0) {
     // Currently in combat, only pull from opponents. Use deaggro
     // distance instead of the normal aggro distance since the AI
     // should technically be aggro until no opponents are still around
