@@ -1475,6 +1475,14 @@ bool CharacterManager::SummonSubDemon(
     }
   }
 
+  // Fully inherited skills (also what @skill ID demon grants)
+  for (auto iSkill : demon->GetInheritedSkills()) {
+    if (!iSkill.IsNull() && iSkill->GetSkill() &&
+        iSkill->GetProgress() >= MAX_INHERIT_SKILL) {
+      extension->InsertAddedSkills(iSkill->GetSkill());
+    }
+  }
+
   for (uint32_t traitID : devilData->GetGrowth()->GetTraits()) {
     if (traitID) {
       extension->InsertAddedSkills(traitID);
