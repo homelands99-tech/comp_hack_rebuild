@@ -3285,7 +3285,8 @@ bool ChatManager::GMCommand_SubDemon(
   libcomp::String arg = args.empty() ? "" : args.front().ToLower();
   if (arg.IsEmpty() || arg == "list") {
     SendChatMessage(client, ChatType_t::CHAT_SELF,
-                    "使い方: @sub 番号（2 体目を出す） / @sub off / @sub list");
+                    server->GetCustomMessage(
+                        "GM_SUB_USAGE", "使い方: @sub 番号（2 体目を出す） / @sub off / @sub list"));
     auto active = state->GetDemonState()->GetEntity();
     int64_t subID = state->GetSubDemonEntityID() ? state->GetSubDemonID() : 0;
     for (size_t i = 0; i < comp->DemonsCount(); i++) {
@@ -3302,10 +3303,11 @@ bool ChatManager::GMCommand_SubDemon(
               .Arg((uint32_t)(i + 1))
               .Arg(name)
               .Arg((int32_t)d->GetCoreStats()->GetLevel())
-              .Arg(d == active ? "（召喚中）"
-                         : (subID && state->GetObjectID(d->GetUUID()) == subID
-                                ? "（2 体目）"
-                                : "")));
+              .Arg(d == active
+                       ? server->GetCustomMessage("GM_SUB_MARK_PARTNER", "（召喚中）")
+                       : (subID && state->GetObjectID(d->GetUUID()) == subID
+                              ? server->GetCustomMessage("GM_SUB_MARK_SUB", "（2 体目）")
+                              : libcomp::String())));
     }
 
     return true;
@@ -3314,8 +3316,10 @@ bool ChatManager::GMCommand_SubDemon(
   if (arg == "off") {
     return SendChatMessage(client, ChatType_t::CHAT_SELF,
                            characterManager->DismissSubDemon(client)
-                               ? "2 体目を戻しました。"
-                               : "2 体目は出ていません。");
+                               ? server->GetCustomMessage("SUB_DEMON_RETURNED",
+                                                          "2 体目を戻しました。")
+                               : server->GetCustomMessage("SUB_DEMON_NOT_OUT",
+                                                          "2 体目は出ていません。"));
   }
 
   if (arg == "reg" || arg == "unreg") {
@@ -3324,8 +3328,9 @@ bool ChatManager::GMCommand_SubDemon(
         state->GetCharacterState(), arg == "reg" ? 0 : 1);
     return SendChatMessage(
         client, ChatType_t::CHAT_SELF,
-        libcomp::String("登録の結果: %1（1 成功、0 変化なし、-1 機能が OFF、"
-                        "-2 召喚中の仲魔なし）")
+        server->GetCustomMessage("GM_SUB_REG_RESULT",
+                                 "登録の結果: %1（1 成功、0 変化なし、-1 機能が OFF、"
+                                 "-2 召喚中の仲魔なし）")
             .Arg((int32_t)result));
   }
 
@@ -3345,15 +3350,20 @@ bool ChatManager::GMCommand_SubDemon(
 
     return SendChatMessage(client, ChatType_t::CHAT_SELF,
                            state->GetSubDemonXP()
-                               ? "2 体目にも経験値が入ります（@sub xp off で止める）。"
-                               : "2 体目には経験値が入りません（@sub xp on で入る）。");
+                               ? server->GetCustomMessage(
+                                     "GM_SUB_XP_ON",
+                                     "2 体目にも経験値が入ります（@sub xp off で止める）。")
+                               : server->GetCustomMessage(
+                                     "GM_SUB_XP_OFF",
+                                     "2 体目には経験値が入りません（@sub xp on で入る）。"));
   }
 
   bool ok = false;
   int32_t slot = arg.ToInteger<int32_t>(&ok);
   if (!ok || slot < 1) {
     return SendChatMessage(client, ChatType_t::CHAT_SELF,
-                           "使い方: @sub 番号（2 体目を出す） / @sub off / @sub list");
+                           server->GetCustomMessage(
+                               "GM_SUB_USAGE", "使い方: @sub 番号（2 体目を出す） / @sub off / @sub list"));
   }
 
   libcomp::String error;
@@ -3362,7 +3372,9 @@ bool ChatManager::GMCommand_SubDemon(
   }
 
   return SendChatMessage(client, ChatType_t::CHAT_SELF,
-                         "2 体目を出しました（自動で戦います）。@sub off で戻します。");
+                         server->GetCustomMessage(
+                             "GM_SUB_SUMMONED",
+                             "2 体目を出しました（自動で戦います）。@sub off で戻します。"));
 }
 
 bool ChatManager::GMCommand_Minion(
@@ -3380,8 +3392,10 @@ bool ChatManager::GMCommand_Minion(
   libcomp::String arg = args.empty() ? "" : args.front().ToLower();
   if (arg.IsEmpty() || arg == "list") {
     SendChatMessage(client, ChatType_t::CHAT_SELF,
-                    "使い方: @minion 型の番号（出す・戻す） / @minion off / "
-                    "@minion list");
+                    server->GetCustomMessage(
+                        "GM_MINION_USAGE",
+                        "使い方: @minion 型の番号（出す・戻す） / @minion off / "
+                        "@minion list"));
     auto all = server->GetServerDataManager()->GetAllMinionData();
     std::set<uint32_t> ids;
     for (auto& pair : all) {
@@ -3390,7 +3404,8 @@ bool ChatManager::GMCommand_Minion(
 
     if (ids.empty()) {
       SendChatMessage(client, ChatType_t::CHAT_SELF,
-                      "ミニオンの型がありません（data/minions.xml）。");
+                      server->GetCustomMessage(
+                          "GM_MINION_NO_TYPES", "ミニオンの型がありません（data/minions.xml）。"));
     }
 
     for (uint32_t id : ids) {
@@ -3403,11 +3418,11 @@ bool ChatManager::GMCommand_Minion(
               .Arg(def->GetName())
               .Arg(devil ? devil->GetBasic()->GetName() : libcomp::String("?"))
               .Arg(def->GetKind() == objects::MinionData::Kind_t::SUPPORT
-                       ? "置物"
-                       : "戦う")
+                       ? server->GetCustomMessage("GM_MINION_KIND_SUPPORT", "置物")
+                       : server->GetCustomMessage("GM_MINION_KIND_FIGHTER", "戦う"))
               .Arg(state->GetMinionEntityID() && state->GetMinionType() == id
-                       ? " ← 出ている"
-                       : ""));
+                       ? server->GetCustomMessage("GM_MINION_MARK_OUT", " ← 出ている")
+                       : libcomp::String()));
     }
 
     return true;
@@ -3416,16 +3431,20 @@ bool ChatManager::GMCommand_Minion(
   if (arg == "off") {
     return SendChatMessage(client, ChatType_t::CHAT_SELF,
                            characterManager->DismissMinion(client)
-                               ? "ミニオンを戻しました。"
-                               : "ミニオンは出ていません。");
+                               ? server->GetCustomMessage("MINION_RETURNED",
+                                                          "ミニオンを戻しました。")
+                               : server->GetCustomMessage("MINION_NOT_OUT",
+                                                          "ミニオンは出ていません。"));
   }
 
   bool ok = false;
   uint32_t id = arg.ToInteger<uint32_t>(&ok);
   if (!ok || !id) {
     return SendChatMessage(client, ChatType_t::CHAT_SELF,
-                           "使い方: @minion 型の番号（出す・戻す） / "
-                           "@minion off / @minion list");
+                           server->GetCustomMessage(
+                               "GM_MINION_USAGE",
+                               "使い方: @minion 型の番号（出す・戻す） / @minion off / "
+                               "@minion list"));
   }
 
   libcomp::String message;

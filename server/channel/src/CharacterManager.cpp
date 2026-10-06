@@ -1483,21 +1483,21 @@ bool CharacterManager::ToggleSubDemon(
     const std::shared_ptr<channel::ChannelClientConnection>& client,
     libcomp::String& message) {
   if (!SVR_CONST.SUB_DEMON_ENABLED) {
-    message = "2 体目は使えません。";
+    message = mServer.lock()->GetCustomMessage("SUB_DEMON_DISABLED", "2 体目は使えません。");
     return false;
   }
 
   auto state = client->GetClientState();
   if (state->GetSubDemonEntityID()) {
     DismissSubDemon(client);
-    message = "2 体目を戻しました。";
+    message = mServer.lock()->GetCustomMessage("SUB_DEMON_RETURNED", "2 体目を戻しました。");
     return true;
   }
 
   auto character = state->GetCharacterState()->GetEntity();
   auto demon = character ? character->GetSubDemon().Get() : nullptr;
   if (!demon) {
-    message = "2 体目に登録した仲魔がいません。";
+    message = mServer.lock()->GetCustomMessage("SUB_DEMON_NOT_REGISTERED", "2 体目に登録した仲魔がいません。");
     return false;
   }
 
@@ -1508,12 +1508,12 @@ bool CharacterManager::ToggleSubDemon(
         return false;
       }
 
-      message = "2 体目を呼び出しました。";
+      message = mServer.lock()->GetCustomMessage("SUB_DEMON_SUMMONED", "2 体目を呼び出しました。");
       return true;
     }
   }
 
-  message = "2 体目に登録した仲魔が COMP にいません。";
+  message = mServer.lock()->GetCustomMessage("SUB_DEMON_NOT_IN_COMP", "2 体目に登録した仲魔が COMP にいません。");
   return false;
 }
 
@@ -1536,7 +1536,8 @@ void CharacterManager::AutoSummonSubDemon(
   libcomp::String message;
   if (ToggleSubDemon(client, message)) {
     mServer.lock()->GetChatManager()->SendChatMessage(
-        client, ChatType_t::CHAT_SELF, "2 体目を自動で呼び出しました。");
+        client, ChatType_t::CHAT_SELF,
+        mServer.lock()->GetCustomMessage("SUB_DEMON_AUTO_SUMMONED", "2 体目を自動で呼び出しました。"));
   }
 }
 
@@ -1574,29 +1575,29 @@ bool CharacterManager::SummonSubDemon(
   auto zone = cState->GetZone();
   auto comp = character ? character->GetCOMP().Get() : nullptr;
   if (!zone || !comp) {
-    error = "ゾーンか COMP が見つかりません。";
+    error = mServer.lock()->GetCustomMessage("SUB_DEMON_NO_ZONE", "ゾーンか COMP が見つかりません。");
     return false;
   }
 
   if (slot >= comp->DemonsCount()) {
-    error = "COMP の番号が範囲の外です。";
+    error = mServer.lock()->GetCustomMessage("SUB_DEMON_BAD_SLOT", "COMP の番号が範囲の外です。");
     return false;
   }
 
   auto demon = comp->GetDemons(slot).Get();
   if (!demon) {
-    error = "その番号の COMP は空です。";
+    error = mServer.lock()->GetCustomMessage("SUB_DEMON_EMPTY_SLOT", "その番号の COMP は空です。");
     return false;
   }
 
   if (state->GetDemonState()->GetEntity() == demon) {
-    error = "召喚中の仲魔は 2 体目にできません。";
+    error = mServer.lock()->GetCustomMessage("SUB_DEMON_IS_PARTNER", "召喚中の仲魔は 2 体目にできません。");
     return false;
   }
 
   auto ds = demon->GetCoreStats().Get();
   if (!ds || ds->GetHP() <= 0) {
-    error = "その仲魔は戦えない状態です（HP 0）。";
+    error = mServer.lock()->GetCustomMessage("SUB_DEMON_DEAD", "その仲魔は戦えない状態です（HP 0）。");
     return false;
   }
 
@@ -1617,7 +1618,7 @@ bool CharacterManager::SummonSubDemon(
 
   auto eState = zoneManager->CreateAlly(zone, demon->GetType(), 0, x, y, rot);
   if (!eState) {
-    error = "味方 NPC を作れませんでした。";
+    error = mServer.lock()->GetCustomMessage("SUB_DEMON_CREATE_FAILED", "味方 NPC を作れませんでした。");
     return false;
   }
 
@@ -1720,7 +1721,7 @@ bool CharacterManager::SummonSubDemon(
   // Appear with the partner demon summon graphic (2)
   if (!zoneManager->AddEnemiesToZone(eStates, zone, false, false, noActions,
                                      2)) {
-    error = "味方 NPC をゾーンに出せませんでした。";
+    error = mServer.lock()->GetCustomMessage("SUB_DEMON_ADD_FAILED", "味方 NPC をゾーンに出せませんでした。");
     return false;
   }
 
@@ -1870,7 +1871,7 @@ void CharacterManager::GrantSubDemonXP(
     auto def = server->GetDefinitionManager()->GetDevilData(demon->GetType());
     server->GetChatManager()->SendChatMessage(
         client, ChatType_t::CHAT_SELF,
-        libcomp::String("2 体目の %1 が Lv%2 になりました。")
+        server->GetCustomMessage("SUB_DEMON_LEVEL_UP", "2 体目の %1 が Lv%2 になりました。")
             .Arg(def ? def->GetBasic()->GetName() : libcomp::String("?"))
             .Arg((int32_t)level));
   }
@@ -1885,28 +1886,29 @@ bool CharacterManager::SummonMinion(
     const std::shared_ptr<channel::ChannelClientConnection>& client,
     uint32_t minionID, libcomp::String& message) {
   if (!SVR_CONST.MINION_ENABLED) {
-    message = "ミニオンは使えません。";
+    message = mServer.lock()->GetCustomMessage("MINION_DISABLED", "ミニオンは使えません。");
     return false;
   }
 
   auto server = mServer.lock();
   auto def = server->GetServerDataManager()->GetMinionData(minionID);
   if (!def) {
-    message = libcomp::String("ミニオンの型 %1 がありません。").Arg(minionID);
+    message = server->GetCustomMessage("MINION_NO_TYPE", "ミニオンの型 %1 がありません。")
+                  .Arg(minionID);
     return false;
   }
 
   auto state = client->GetClientState();
   if (state->GetMinionEntityID() && state->GetMinionType() == minionID) {
     DismissMinion(client);
-    message = "ミニオンを戻しました。";
+    message = mServer.lock()->GetCustomMessage("MINION_RETURNED", "ミニオンを戻しました。");
     return true;
   }
 
   uint64_t now = ChannelServer::GetServerTime();
   if (state->MinionCooldownsKeyExists(minionID) &&
       now < state->GetMinionCooldowns(minionID)) {
-    message = libcomp::String("このミニオンはあと %1 秒呼べません。")
+    message = server->GetCustomMessage("MINION_COOLDOWN", "このミニオンはあと %1 秒呼べません。")
                   .Arg((state->GetMinionCooldowns(minionID) - now) / 1000000ULL +
                        1);
     return false;
@@ -1915,7 +1917,7 @@ bool CharacterManager::SummonMinion(
   auto cState = state->GetCharacterState();
   auto zone = cState->GetZone();
   if (!zone || !cState->IsAlive()) {
-    message = "今はミニオンを呼べません。";
+    message = mServer.lock()->GetCustomMessage("MINION_CANNOT_NOW", "今はミニオンを呼べません。");
     return false;
   }
 
@@ -1923,7 +1925,7 @@ bool CharacterManager::SummonMinion(
   auto zoneManager = server->GetZoneManager();
   auto devilData = definitionManager->GetDevilData(def->GetDemonType());
   if (!devilData) {
-    message = "ミニオンの悪魔の種類が正しくありません。";
+    message = mServer.lock()->GetCustomMessage("MINION_BAD_DEMON", "ミニオンの悪魔の種類が正しくありません。");
     return false;
   }
 
@@ -1940,7 +1942,7 @@ bool CharacterManager::SummonMinion(
 
   auto eState = zoneManager->CreateAlly(zone, def->GetDemonType(), 0, x, y, rot);
   if (!eState) {
-    message = "ミニオンを作れませんでした。";
+    message = mServer.lock()->GetCustomMessage("MINION_CREATE_FAILED", "ミニオンを作れませんでした。");
     return false;
   }
 
@@ -2081,7 +2083,7 @@ bool CharacterManager::SummonMinion(
   std::list<std::shared_ptr<objects::Action>> noActions;
   if (!zoneManager->AddEnemiesToZone(eStates, zone, false, false, noActions,
                                      2)) {
-    message = "ミニオンをゾーンに出せませんでした。";
+    message = mServer.lock()->GetCustomMessage("MINION_ADD_FAILED", "ミニオンをゾーンに出せませんでした。");
     return false;
   }
 
@@ -2127,7 +2129,7 @@ bool CharacterManager::SummonMinion(
         this, client, entityID);
   }
 
-  message = "ミニオンを呼び出しました。";
+  message = mServer.lock()->GetCustomMessage("MINION_SUMMONED", "ミニオンを呼び出しました。");
   return true;
 }
 
@@ -2191,7 +2193,7 @@ void CharacterManager::MinionDied(
   }
 
   server->GetChatManager()->SendChatMessage(client, ChatType_t::CHAT_SELF,
-                                            "ミニオンが倒れました。");
+                                            server->GetCustomMessage("MINION_DIED", "ミニオンが倒れました。"));
 }
 
 bool CharacterManager::MinionConsumesItem(
@@ -2295,7 +2297,8 @@ void CharacterManager::MinionTimeUp(
     int32_t entityID) {
   if (DismissMinion(client, entityID)) {
     mServer.lock()->GetChatManager()->SendChatMessage(
-        client, ChatType_t::CHAT_SELF, "ミニオンが帰りました（時間切れ）。");
+        client, ChatType_t::CHAT_SELF,
+        mServer.lock()->GetCustomMessage("MINION_TIME_UP", "ミニオンが帰りました（時間切れ）。"));
   }
 }
 
