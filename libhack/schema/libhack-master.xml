@@ -9,6 +9,7 @@
     <include path="ailogic.xml"/>
     <include path="character.xml"/>
     <include path="clan.xml"/>
+    <include path="custom_message.xml"/>
     <include path="demon.xml"/>
     <include path="enemy.xml"/>
     <include path="fusion.xml"/>

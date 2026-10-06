@@ -60,6 +60,7 @@ namespace objects {
 class Action;
 class AILogicGroup;
 class DemonFamiliarityType;
+class CustomMessage;
 class DemonPresent;
 class DemonQuestReward;
 class DropSet;
@@ -234,6 +235,17 @@ class ServerDataManager {
    * @return Pointer to the demon present entry matching the specified id
    */
   const std::shared_ptr<objects::DemonPresent> GetDemonPresentData(uint32_t id);
+
+  /**
+   * Get the text of a message added by this fork: the Text of the entry with
+   * the ID in data/custom_messages.xml, or the default from the source when
+   * there is no such entry (or its Text is empty).
+   * @param id Message ID (for example SUB_DEMON_SUMMONED)
+   * @param defaultText Text written in the source
+   * @return Text to show
+   */
+  libcomp::String GetCustomMessage(const libcomp::String& id,
+                                   const libcomp::String& defaultText);
 
   /**
    * Get all demon quest reward definitions
@@ -633,6 +645,9 @@ class ServerDataManager {
   /// Map of demon present entries by definition ID
   std::unordered_map<uint32_t, std::shared_ptr<objects::DemonPresent>>
       mDemonPresentData;
+
+  /// Message texts of data/custom_messages.xml by ID
+  std::unordered_map<std::string, libcomp::String> mCustomMessages;
 
   /// Map of demon quest reward entries by definition ID
   std::unordered_map<uint32_t, std::shared_ptr<objects::DemonQuestReward>>

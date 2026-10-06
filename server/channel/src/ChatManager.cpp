@@ -1060,11 +1060,33 @@ bool ChatManager::GMCommand_Force(
   auto state = client->GetClientState();
   uint16_t bulkMax = SVR_CONST.DEMON_FORCE_BULK;
 
+  // Names of the 20 force values (custom message FORCE_STAT_NAMES, comma
+  // separated; the defaults are used unless it has all 20)
+  std::vector<libcomp::String> forceNames;
+  {
+    libcomp::String defNames;
+    for (size_t i = 0; i < 20; i++) {
+      defNames += libcomp::String(i ? ",%1" : "%1").Arg(FORCE_NAMES[i]);
+    }
+
+    for (auto& n :
+         server->GetCustomMessage("FORCE_STAT_NAMES", defNames).Split(",")) {
+      forceNames.push_back(n.Trimmed());
+    }
+
+    if (forceNames.size() != 20) {
+      forceNames.clear();
+      for (size_t i = 0; i < 20; i++) {
+        forceNames.push_back(FORCE_NAMES[i]);
+      }
+    }
+  }
+
   std::list<libcomp::String> argsCopy = args;
   if (!argsCopy.empty()) {
     if (bulkMax <= 1) {
       return SendChatMessage(client, ChatType_t::CHAT_SELF,
-                             "まとめ使いは無効です（DEMON_FORCE_BULK）");
+                             server->GetCustomMessage("FORCE_DISABLED", "まとめ使いは無効です（DEMON_FORCE_BULK）"));
     }
 
     libcomp::String value = argsCopy.front().ToLower();
@@ -1074,14 +1096,15 @@ bool ChatManager::GMCommand_Force(
           argsCopy.empty() ? libcomp::String() : argsCopy.front().ToLower();
       if (mode != "on" && mode != "off") {
         return SendChatMessage(client, ChatType_t::CHAT_SELF,
-                               "使い方: @force effect on または off");
+                               server->GetCustomMessage("FORCE_EFFECT_USAGE", "使い方: @force effect on または off"));
       }
 
       state->SetDemonForceNoEffect(mode == "off");
       return SendChatMessage(
           client, ChatType_t::CHAT_SELF,
-          mode == "off" ? "ゲージ満タンの演出: なし"
-                        : "ゲージ満タンの演出: あり");
+          mode == "off"
+              ? server->GetCustomMessage("FORCE_EFFECT_OFF", "ゲージ満タンの演出: なし")
+              : server->GetCustomMessage("FORCE_EFFECT_ON", "ゲージ満タンの演出: あり"));
     }
 
     uint16_t count = 0;
@@ -1089,7 +1112,7 @@ bool ChatManager::GMCommand_Force(
         (!GetIntegerArg<uint16_t>(count, argsCopy) || count < 1)) {
       return SendChatMessage(
           client, ChatType_t::CHAT_SELF,
-          libcomp::String("使い方: @force 個数（1〜%1）または @force max")
+          server->GetCustomMessage("FORCE_USAGE", "使い方: @force 個数（1〜%1）または @force max")
               .Arg(bulkMax));
     }
 
@@ -1104,8 +1127,9 @@ bool ChatManager::GMCommand_Force(
     uint16_t current = state->GetDemonForceBulk();
     SendChatMessage(
         client, ChatType_t::CHAT_SELF,
-        libcomp::String("まとめ使い: 1回で最大%1個（上限%2、"
-                        "パッシブ候補が出たら止まります）")
+        server->GetCustomMessage("FORCE_BULK",
+                                 "まとめ使い: 1回で最大%1個（上限%2、"
+                                 "パッシブ候補が出たら止まります）")
             .Arg(current == 0 ? bulkMax : current)
             .Arg(bulkMax));
   }
@@ -1114,7 +1138,7 @@ bool ChatManager::GMCommand_Force(
   auto demon = dState->GetEntity();
   if (!demon) {
     return SendChatMessage(client, ChatType_t::CHAT_SELF,
-                           "悪魔を召喚すると状況を表示します");
+                           server->GetCustomMessage("FORCE_NO_DEMON", "悪魔を召喚すると状況を表示します"));
   }
 
   int32_t gauge = demon->GetBenefitGauge();
@@ -1127,9 +1151,9 @@ bool ChatManager::GMCommand_Force(
   }
 
   libcomp::String gaugeText =
-      libcomp::String("ゲージ: %1").Arg(gauge);
+      server->GetCustomMessage("FORCE_GAUGE", "ゲージ: %1").Arg(gauge);
   if (next) {
-    gaugeText = libcomp::String("%1（次のパッシブ候補は%2、あと%3個）")
+    gaugeText = server->GetCustomMessage("FORCE_GAUGE_NEXT", "%1（次のパッシブ候補は%2、あと%3個）")
                     .Arg(gaugeText)
                     .Arg(next)
                     .Arg(next - gauge);
@@ -1138,8 +1162,9 @@ bool ChatManager::GMCommand_Force(
 
   if (demon->GetForceStackPending()) {
     SendChatMessage(client, ChatType_t::CHAT_SELF,
-                    "パッシブ候補が未配置です（配置か破棄をすると"
-                    "次のアイテムを使えます）");
+                    server->GetCustomMessage("FORCE_PENDING",
+                                             "パッシブ候補が未配置です（配置か破棄をすると"
+                                             "次のアイテムを使えます）"));
   }
 
   libcomp::String values;
@@ -1149,7 +1174,7 @@ bool ChatManager::GMCommand_Force(
 
     int32_t hundredths = (fVal % DEMON_FORCE_PRECISION) / 1000;
     libcomp::String entry = libcomp::String("%1 %2.%3%4")
-                                .Arg(FORCE_NAMES[i])
+                                .Arg(forceNames[i])
                                 .Arg(fVal / DEMON_FORCE_PRECISION)
                                 .Arg(hundredths < 10 ? "0" : "")
                                 .Arg(hundredths);
@@ -1159,8 +1184,8 @@ bool ChatManager::GMCommand_Force(
 
   return SendChatMessage(
       client, ChatType_t::CHAT_SELF,
-      libcomp::String("フォース: %1")
-          .Arg(values.IsEmpty() ? libcomp::String("なし") : values));
+      server->GetCustomMessage("FORCE_VALUES", "フォース: %1")
+          .Arg(values.IsEmpty() ? server->GetCustomMessage("FORCE_NONE", "なし") : values));
 }
 
 bool ChatManager::GMCommand_DemonForce(
