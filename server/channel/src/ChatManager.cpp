@@ -440,8 +440,13 @@ bool ChatManager::HandleGMand(
     libcomp::String sentFrom =
         state->GetCharacterState()->GetEntity()->GetName();
 
-    if (state->GetUserLevel() == 0 && "@version" != message &&
-        "@license" != message) {
+    // @bag is open to all players while INVENTORY_PAGES is on
+    libcomp::String commandName(match[1]);
+    bool playerCommand =
+        "@version" == message || "@license" == message ||
+        (SVR_CONST.INVENTORY_PAGES && commandName.ToLower() == "bag");
+
+    if (state->GetUserLevel() == 0 && !playerCommand) {
       // Don't process the message but don't fail
       LogChatManagerInfo([&]() {
         return libcomp::String(
@@ -460,7 +465,10 @@ bool ChatManager::HandleGMand(
     }
 
     LogChatManagerInfo([&]() {
-      return libcomp::String("[GM] %1: %2\n").Arg(sentFrom).Arg(message);
+      return libcomp::String("%1 %2: %3\n")
+          .Arg(state->GetUserLevel() == 0 ? "[Player]" : "[GM]")
+          .Arg(sentFrom)
+          .Arg(message);
     });
 
     libcomp::String command(match[1]);
@@ -3901,6 +3909,14 @@ bool ChatManager::GMCommand_Bag(
     const std::shared_ptr<channel::ChannelClientConnection>& client,
     const std::list<libcomp::String>& args) {
   auto server = mServer.lock();
+  if (!SVR_CONST.INVENTORY_PAGES) {
+    return SendChatMessage(client, ChatType_t::CHAT_SELF,
+                           server->GetCustomMessage(
+                               "BAG_DISABLED",
+                               "インベントリのページ切替は無効です"
+                               "（constants.xml の INVENTORY_PAGES）。"));
+  }
+
   auto characterManager = server->GetCharacterManager();
 
   std::list<libcomp::String> argsCopy = args;

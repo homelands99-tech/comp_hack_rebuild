@@ -2049,7 +2049,13 @@ bool CharacterManager::SwitchInventoryPage(
   }
 
   auto dbChanges = libcomp::DatabaseChangeSet::Create(state->GetAccountUID());
-  CreateInventoryPageBoxes(character, dbChanges);
+  if (CreateInventoryPageBoxes(character, dbChanges)) {
+    // Save the new boxes right away: the checks below may return without
+    // switching and boxes that exist only in memory would be referenced by
+    // the character on logout, breaking the next login.
+    mServer.lock()->GetWorldDatabase()->QueueChangeSet(dbChanges);
+    dbChanges = libcomp::DatabaseChangeSet::Create(state->GetAccountUID());
+  }
 
   uint8_t current = GetCurrentInventoryPage(character);
   if (!current) {

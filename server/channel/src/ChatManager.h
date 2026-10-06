@@ -714,7 +714,8 @@ class ChatManager {
       const std::list<libcomp::String>& args);
 
   /**
-   * Command (available to everyone) to show or switch the inventory page.
+   * Command to show or switch the inventory page (INVENTORY_PAGES constant;
+   * while on, players without GM privileges can use it too).
    * @param client Pointer to the client that sent the command
    * @param args List of arguments for the command
    * @return true if the command was handled properly, else false

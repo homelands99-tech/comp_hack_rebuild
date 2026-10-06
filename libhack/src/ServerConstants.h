@@ -469,6 +469,10 @@ class ServerConstants {
     /// there automatically (1 = on, 0 = off). Optional, defaults to off.
     uint8_t AUTO_MATERIAL_TANK;
 
+    /// If the @bag inventory page switching can be used, also by players
+    /// without GM privileges (1 = on, 0 = off). Optional, defaults to off.
+    uint8_t INVENTORY_PAGES;
+
     /// Default zone to move players when no other zone is found
     uint32_t ZONE_DEFAULT;
 
