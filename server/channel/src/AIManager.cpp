@@ -1049,8 +1049,13 @@ bool AIManager::UpdateState(const std::shared_ptr<ActiveEntityState>& eState,
           if (aiState->GetPreviousStatus() == AIStatus_t::AGGRO ||
               aiState->GetPreviousStatus() == AIStatus_t::COMBAT ||
               aiState->GetPreviousStatus() == AIStatus_t::ENRAGED) {
-            // Leftover combat skill, cancel it
-            cancelActivatedSkill = true;
+            // Leftover combat skill, cancel it (but not a companion's skill
+            // on its owner or itself, see UpdateCompanionSkill)
+            int32_t skillTarget = (int32_t)activated->GetTargetObjectID();
+            cancelActivatedSkill =
+                !aiState->GetCompanion() ||
+                (skillTarget != aiState->GetFollowEntityID() &&
+                 skillTarget != eState->GetEntityID());
           }
           break;
         case AIStatus_t::ENRAGED: {
