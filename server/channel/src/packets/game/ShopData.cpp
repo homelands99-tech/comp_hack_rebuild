@@ -114,7 +114,8 @@ bool Parsers::ShopData::Parse(
       worldClock.SystemTime, worldClock.GameOffset);
 
   float trendAdjust = shopData->GetTrendAdjustment();
-  if (shopData->GetType() == objects::ServerShop::Type_t::COMP_SHOP) {
+  if (shopData->GetType() == objects::ServerShop::Type_t::COMP_SHOP ||
+      shopData->GetType() == objects::ServerShop::Type_t::GACHA) {
     // COMP shops have no trends
     trendAdjust = 0.f;
   }

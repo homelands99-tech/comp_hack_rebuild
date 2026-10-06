@@ -37,6 +37,28 @@ rest goes to the inventory). Loot that fits in the tank can be picked up even
 with a full inventory. Enable with `AUTO_MATERIAL_TANK` = 1 in
 constants.xml.*
 
+## ガチャ画面の復活 / Gacha ##
+
+クライアントに残っているガチャ画面を、COMP ショップの一覧から開けるようにします。
+CP で引き、景品は宅配に届きます。ショップ XML の `Type` を `GACHA` にしたときだけ動き、
+対応したクライアント（非公開）が必要です。GM コマンド `@gacha` やタブの条件で、表示・非表示と
+景品の切り替えができます。
+
+詳しくは [GACHA.md](GACHA.md) を見てください。
+
+### 設定 ###
+
+```xml
+<constant name="GACHA_ENABLED">1</constant>
+```
+
+`0` または行が無い場合は無効です（`GACHA` のショップは一覧に出ません）。
+
+*English: Restores the client's gacha window. Shops with `Type` `GACHA` are
+listed in the COMP shop menu (needs a client that supports it, not public); drawing charges CP and
+sends a weighted random prize to the post. Toggle with `@gacha` or tab
+conditions. Enable with `GACHA_ENABLED` = 1 in constants.xml. See GACHA.md.*
+
 ## デモンフォースのまとめ使い / Bulk demon force ##
 
 悪魔にフォース用アイテムを使うとき、1回の使用で同じアイテムを複数個まとめて

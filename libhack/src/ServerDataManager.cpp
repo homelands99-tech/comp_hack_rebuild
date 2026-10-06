@@ -1964,7 +1964,9 @@ bool ServerDataManager::LoadObject<objects::ServerShop>(
 
   mShopData[id] = shop;
 
-  if (shop->GetType() == objects::ServerShop::Type_t::COMP_SHOP) {
+  if (shop->GetType() == objects::ServerShop::Type_t::COMP_SHOP ||
+      shop->GetType() == objects::ServerShop::Type_t::GACHA) {
+    // Gacha shops are listed in the COMP shop menu as well
     mCompShopIDs.push_back(id);
   }
 

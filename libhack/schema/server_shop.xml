@@ -6,6 +6,7 @@
         <member type="enum" name="Type" underlying="uint8_t">
             <value>NORMAL</value>
             <value>COMP_SHOP</value>
+            <value>GACHA</value>
         </member>
         <member type="enum" name="RepairType" underlying="uint8_t">
             <value>ANY</value>
@@ -17,6 +18,9 @@
         <member type="bool" name="LNCAdjust"/>
         <member type="float" name="LNCCenter"/>
         <member type="float" name="TrendAdjustment" min="0.0" default="0.33"/>
+        <!-- GACHA only: hidden from the COMP shop menu and not drawable.
+             Can be toggled at runtime with @gacha (resets on restart). -->
+        <member type="bool" name="Disabled"/>
         <member type="list" name="Tabs">
             <element type="ServerShopTab*"/>
         </member>
@@ -38,5 +42,6 @@
         <member type="u16" name="MoonRestrict"/>
         <member type="u8" name="FilterGroups" max="0x0F"/>
         <member type="bool" name="TrendDisabled"/>
+        <member type="u16" name="GachaWeight" default="1"/>
     </object>
 </objgen>

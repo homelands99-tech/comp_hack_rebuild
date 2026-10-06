@@ -31,6 +31,7 @@
 #include <ManagerPacket.h>
 #include <Packet.h>
 #include <PacketCodes.h>
+#include <Randomizer.h>
 #include <ServerConstants.h>
 #include <ServerDataManager.h>
 
@@ -57,6 +58,7 @@
 // channel Includes
 #include "ChannelServer.h"
 #include "ChannelSyncManager.h"
+#include "Gacha.h"
 #include "CharacterManager.h"
 
 using namespace channel;
@@ -85,6 +87,141 @@ void SendShopPurchaseReply(
   }
 }
 
+// Gacha draw: the client sends the product from the draw tab (with a
+// quantity of 0). Its CP cost (product data, or the base price when that is
+// 0) is charged, then one product from the other (open) tabs is picked
+// by GachaWeight and sent to the post. The reply carries the product that
+// was won so the client can display it.
+void HandleGachaDraw(const std::shared_ptr<ChannelServer> server,
+                     const std::shared_ptr<ChannelClientConnection> client,
+                     const std::shared_ptr<objects::ServerShop>& shop,
+                     int32_t shopID, int32_t productID) {
+  auto state = client->GetClientState();
+  auto character = state->GetCharacterState()->GetEntity();
+  auto definitionManager = server->GetDefinitionManager();
+  auto accountUID = state->GetAccountUID();
+
+  if (!gacha::IsAvailable(server, client, shop)) {
+    // Disabled or closed since the menu was opened
+    SendShopPurchaseReply(client, shopID, productID, -2, false);
+    return;
+  }
+
+  int32_t price = -1;
+  std::list<std::shared_ptr<objects::ServerShopProduct>> prizes;
+  uint32_t totalWeight = 0;
+  for (auto tab : shop->GetTabs()) {
+    bool drawTab = tab->GetName() == gacha::DRAW_TAB_NAME;
+    if (!drawTab && !gacha::IsTabOpen(server, client, tab)) {
+      // Prize tabs can be switched by their conditions
+      continue;
+    }
+
+    for (auto p : tab->GetProducts()) {
+      if (drawTab) {
+        if (p->GetProductID() == productID) {
+          // The client displays the CP cost from the product data so
+          // prefer it; the shop base price is only a fallback
+          auto pData = definitionManager->GetShopProductData(
+              (uint32_t)p->GetProductID());
+          price = pData && pData->GetCPCost() > 0
+                      ? (int32_t)pData->GetCPCost()
+                      : p->GetBasePrice();
+        }
+      } else if (p->GetGachaWeight() > 0 &&
+                 definitionManager->GetShopProductData(p->GetProductID())) {
+        prizes.push_back(p);
+        totalWeight += p->GetGachaWeight();
+      }
+    }
+  }
+
+  if (price < 0 || prizes.empty()) {
+    LogGeneralError([shopID, productID]() {
+      return libcomp::String(
+                 "Invalid gacha draw: shopID=%1, productID=%2 (draw product "
+                 "not in the '%3' tab or no prizes)\n")
+          .Arg(shopID)
+          .Arg(productID)
+          .Arg(gacha::DRAW_TAB_NAME);
+    });
+
+    SendShopPurchaseReply(client, shopID, productID, -2, false);
+    return;
+  }
+
+  // Pick the prize
+  std::shared_ptr<objects::ServerShopProduct> prize;
+  uint32_t roll = RNG(uint32_t, 1, totalWeight);
+  for (auto p : prizes) {
+    if (roll <= p->GetGachaWeight()) {
+      prize = p;
+      break;
+    }
+
+    roll -= p->GetGachaWeight();
+  }
+
+  if (!prize) {
+    prize = prizes.back();
+  }
+
+  int32_t prizeID = (int32_t)prize->GetProductID();
+
+  // Prizes always go to the post like other CP purchases
+  auto lobbyDB = server->GetLobbyDatabase();
+  auto postItems = objects::PostItem::LoadPostItemListByAccount(
+      lobbyDB, character->GetAccount());
+  if (((int32_t)postItems.size() + 1) >= MAX_POST_ITEM_COUNT) {
+    SendShopPurchaseReply(client, shopID, productID, -1, false);
+    return;
+  }
+
+  auto account = libcomp::PersistentObject::LoadObjectByUUID<objects::Account>(
+      lobbyDB, character->GetAccount(), true);
+  uint32_t cp = account ? account->GetCP() : 0;
+  if (!account || cp < (uint32_t)price) {
+    SendShopPurchaseReply(client, shopID, productID, -2, false);
+    return;
+  }
+
+  auto opChangeset = std::make_shared<libcomp::DBOperationalChangeSet>();
+  if (price > 0) {
+    auto expl = std::make_shared<libcomp::DBExplicitUpdate>(account);
+    expl->SubtractFrom<int64_t>("CP", price, (int32_t)cp);
+    opChangeset->AddOperation(expl);
+  }
+
+  auto postItem = libcomp::PersistentObject::New<objects::PostItem>(true);
+  postItem->SetType((uint32_t)prizeID);
+  postItem->SetTimestamp((uint32_t)std::time(0));
+  postItem->SetAccount(character->GetAccount());
+  opChangeset->Insert(postItem);
+
+  if (!lobbyDB->ProcessChangeSet(opChangeset)) {
+    LogGeneralError([accountUID]() {
+      return libcomp::String("Gacha draw failed to save for player: %1\n")
+          .Arg(accountUID.ToString());
+    });
+
+    SendShopPurchaseReply(client, shopID, productID, -2, false);
+    return;
+  }
+
+  server->GetChannelSyncManager()->SyncRecordUpdate(account, "Account");
+
+  LogItemDebug([shopID, prizeID, price, accountUID]() {
+    return libcomp::String(
+               "Gacha %1 drawn for %2 CP, won product %3 by player: %4\n")
+        .Arg(shopID)
+        .Arg(price)
+        .Arg(prizeID)
+        .Arg(accountUID.ToString());
+  });
+
+  SendShopPurchaseReply(client, shopID, prizeID, 1, false);
+}
+
 void HandleShopPurchase(const std::shared_ptr<ChannelServer> server,
                         const std::shared_ptr<ChannelClientConnection> client,
                         int32_t shopID, int32_t clientTrendTime,
@@ -99,6 +236,12 @@ void HandleShopPurchase(const std::shared_ptr<ChannelServer> server,
   auto definitionManager = server->GetDefinitionManager();
 
   auto shop = server->GetServerDataManager()->GetShopData((uint32_t)shopID);
+  if (shop && shop->GetType() == objects::ServerShop::Type_t::GACHA) {
+    // Gacha shops are opened from the COMP shop menu like COMP shops
+    HandleGachaDraw(server, client, shop, shopID, productID);
+    return;
+  }
+
   if (shop && shop->GetType() != objects::ServerShop::Type_t::COMP_SHOP) {
     // COMP shops are available at any time and share a menu so only
     // check normal shops
@@ -442,14 +585,18 @@ bool Parsers::ShopBuy::Parse(
   libcomp::String giftMessage =
       p.ReadString16Little(state->GetClientStringEncoding(), true);
 
-  if (quantity <= 0) {
+  auto server =
+      std::dynamic_pointer_cast<ChannelServer>(pPacketManager->GetServer());
+
+  // The gacha window always sends a quantity of 0 when drawing
+  auto shop = server->GetServerDataManager()->GetShopData((uint32_t)shopID);
+  bool gacha = shop && shop->GetType() == objects::ServerShop::Type_t::GACHA;
+
+  if (quantity <= 0 && !gacha) {
     // Nothing to do
     SendShopPurchaseReply(client, shopID, productID, 0, false);
     return true;
   }
-
-  auto server =
-      std::dynamic_pointer_cast<ChannelServer>(pPacketManager->GetServer());
 
   server->QueueWork(HandleShopPurchase, server, client, shopID, clientTrendTime,
                     productID, quantity, gifteeName, giftMessage);

@@ -477,6 +477,10 @@ class ServerConstants {
     /// without GM privileges (1 = on, 0 = off). Optional, defaults to off.
     uint8_t INVENTORY_PAGES;
 
+    /// If gacha shops (ServerShop type GACHA) are listed and can be drawn
+    /// (1 = on, 0 = off). Optional, defaults to off.
+    uint8_t GACHA_ENABLED;
+
     /// Default zone to move players when no other zone is found
     uint32_t ZONE_DEFAULT;
 
