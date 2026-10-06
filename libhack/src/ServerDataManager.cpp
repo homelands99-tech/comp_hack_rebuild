@@ -45,6 +45,7 @@
 #include <ActionZoneChange.h>
 #include <ActionZoneInstance.h>
 #include <DemonFamiliarityType.h>
+#include <CustomMessage.h>
 #include <DemonPresent.h>
 #include <DemonQuestReward.h>
 #include <DropSet.h>
@@ -335,6 +336,12 @@ ServerDataManager::GetDemonFamiliarityTypeData(int32_t id) {
       id, mDemonFamiliarityTypeData);
 }
 
+libcomp::String ServerDataManager::GetCustomMessage(
+    const libcomp::String& id, const libcomp::String& defaultText) {
+  auto it = mCustomMessages.find(id.C());
+  return it != mCustomMessages.end() ? it->second : defaultText;
+}
+
 const std::shared_ptr<objects::DemonPresent>
 ServerDataManager::GetDemonPresentData(uint32_t id) {
   return GetObjectByID<uint32_t, objects::DemonPresent>(id, mDemonPresentData);
@@ -464,6 +471,14 @@ bool ServerDataManager::LoadData(DataStore* pDataStore,
       failure = !LoadObjects<objects::Tokusei>(pDataStore, "/data/tokusei",
                                                definitionManager, true, true);
     }
+  }
+
+  if (!failure) {
+    LogServerDataManagerDebugMsg("Loading custom message texts...\n");
+
+    // Optional: data/custom_messages.xml (or files in data/custom_messages)
+    failure = !LoadObjects<objects::CustomMessage>(
+        pDataStore, "/data/custom_messages", definitionManager, true, true);
   }
 
   if (!failure) {
@@ -2029,6 +2044,30 @@ bool ServerDataManager::LoadObject<objects::DemonPresent>(
   }
 
   mDemonPresentData[id] = present;
+
+  return true;
+}
+
+template <>
+bool ServerDataManager::LoadObject<objects::CustomMessage>(
+    const tinyxml2::XMLDocument& doc, const tinyxml2::XMLElement* objNode,
+    DefinitionManager* definitionManager) {
+  (void)definitionManager;
+
+  auto msg = std::shared_ptr<objects::CustomMessage>(new objects::CustomMessage);
+  if (!msg->Load(doc, *objNode)) {
+    return false;
+  }
+
+  if (msg->GetID().IsEmpty()) {
+    LogServerDataManagerWarningMsg("Custom message without an ID skipped\n");
+    return true;
+  }
+
+  // An empty Text keeps the default from the source
+  if (!msg->GetText().IsEmpty()) {
+    mCustomMessages[msg->GetID().C()] = msg->GetText();
+  }
 
   return true;
 }
