@@ -138,6 +138,7 @@ ChatManager::ChatManager(const std::weak_ptr<ChannelServer>& server)
   mGMands["reported"] = &ChatManager::GMCommand_Reported;
   mGMands["resolve"] = &ChatManager::GMCommand_Resolve;
   mGMands["reunion"] = &ChatManager::GMCommand_Reunion;
+  mGMands["rpoint"] = &ChatManager::GMCommand_ReunionPoints;
   mGMands["scrap"] = &ChatManager::GMCommand_Scrap;
   mGMands["skill"] = &ChatManager::GMCommand_Skill;
   mGMands["forgetskill"] = &ChatManager::GMCommand_ForgetSkill;
@@ -2354,6 +2355,12 @@ bool ChatManager::GMCommand_Help(
        {"@resolve ENTRYUID",
         "Resolve a reported player record by UID. Records can",
         "be retrieved via @reported."}},
+      {"rpoint",
+       {"@rpoint [mitama] [[+|-]VALUE] [NAME]",
+        "Shows or changes the reunion conversion points (or the mitama",
+        "points with 'mitama') of the character NAME's account, or your",
+        "own if no NAME is specified. +VALUE adds, -VALUE removes and",
+        "VALUE sets the points. The character must be online."}},
       {"reunion",
        {"@reunion TYPE [RANK]",
         "Perform reunion on your currently summoned demon setting",
@@ -3307,6 +3314,133 @@ bool ChatManager::GMCommand_Resolve(
 
   if (failed) {
     SendChatMessage(client, ChatType_t::CHAT_SELF, "Resolve failed");
+  }
+
+  return true;
+}
+
+bool ChatManager::GMCommand_ReunionPoints(
+    const std::shared_ptr<channel::ChannelClientConnection>& client,
+    const std::list<libcomp::String>& args) {
+  if (!HaveUserLevel(client, SVR_CONST.GM_CMD_LVL_REUNION)) {
+    return true;
+  }
+
+  std::list<libcomp::String> argsCopy = args;
+
+  bool mitama = false;
+  if (!argsCopy.empty() && argsCopy.front().ToLower() == "mitama") {
+    mitama = true;
+    argsCopy.pop_front();
+  }
+
+  // Optional value: +N adds, -N removes, N sets
+  bool hasValue = false;
+  int8_t mode = 0;
+  int64_t value = 0;
+  if (!argsCopy.empty()) {
+    std::string text = argsCopy.front().C();
+    size_t start = 0;
+    if (!text.empty() && (text[0] == '+' || text[0] == '-')) {
+      mode = text[0] == '+' ? 1 : -1;
+      start = 1;
+    }
+
+    if (text.size() > start &&
+        text.find_first_not_of("0123456789", start) == std::string::npos) {
+      value = std::strtoll(text.c_str() + start, nullptr, 10);
+      if (value > INT32_MAX) {
+        // Keep "before + value" inside int64 (strtoll saturates at
+        // LLONG_MAX for huge inputs)
+        value = INT32_MAX;
+      }
+
+      hasValue = true;
+      argsCopy.pop_front();
+    } else if (mode != 0) {
+      return SendChatMessage(client, ChatType_t::CHAT_SELF,
+                             mServer.lock()->GetCustomMessage("RPOINT_USAGE", "使い方: @rpoint [mitama] [[+|-]数] [キャラクター名]"));
+    }
+  }
+
+  auto targetClient = client;
+  libcomp::String name;
+  if (GetStringArg(name, argsCopy)) {
+    std::shared_ptr<objects::Character> targetCharacter;
+    std::shared_ptr<objects::Account> targetAccount;
+    if (!GetTargetCharacterAccount(name, false, targetCharacter, targetAccount,
+                                   targetClient) ||
+        !targetClient) {
+      return SendChatMessage(
+          client, ChatType_t::CHAT_SELF,
+          mServer.lock()->GetCustomMessage("RPOINT_NO_CHARACTER", "キャラクター %1 が見つからないか、接続していません")
+              .Arg(name));
+    }
+  }
+
+  auto targetState = targetClient->GetClientState();
+  auto awd = targetState->GetAccountWorldData().Get();
+  auto targetCharacter = targetState->GetCharacterState()->GetEntity();
+  if (!awd || !targetCharacter) {
+    return SendChatMessage(client, ChatType_t::CHAT_SELF,
+                           mServer.lock()->GetCustomMessage("RPOINT_NO_DATA", "ポイントの情報を読み込めませんでした"));
+  }
+
+  libcomp::String pointName =
+      mitama ? mServer.lock()->GetCustomMessage("RPOINT_NAME_MITAMA", "御霊ポイント")
+             : mServer.lock()->GetCustomMessage("RPOINT_NAME_REUNION", "リユニオン変換ポイント");
+  int64_t before = mitama ? (int64_t)awd->GetMitamaReunionPoints()
+                          : (int64_t)awd->GetReunionPoints();
+
+  if (!hasValue) {
+    return SendChatMessage(
+        client, ChatType_t::CHAT_SELF,
+        mServer.lock()->GetCustomMessage("RPOINT_SHOW", "%1: リユニオン変換ポイント %2 / 御霊ポイント %3")
+            .Arg(targetCharacter->GetName())
+            .Arg(awd->GetReunionPoints())
+            .Arg(awd->GetMitamaReunionPoints()));
+  }
+
+  int64_t after = mode == 0 ? value : before + mode * value;
+  if (after < 0) {
+    after = 0;
+  } else if (after > INT32_MAX) {
+    after = INT32_MAX;
+  }
+
+  if (mitama) {
+    awd->SetMitamaReunionPoints((uint32_t)after);
+  } else {
+    awd->SetReunionPoints((uint32_t)after);
+  }
+
+  auto server = mServer.lock();
+  server->GetWorldDatabase()->QueueUpdate(awd, targetState->GetAccountUID());
+
+  // Same reply as the reunion points request so an open window can refresh
+  libcomp::Packet reply;
+  reply.WritePacketCode(ChannelToClientPacketCode_t::PACKET_REUNION_POINTS);
+  reply.WriteS32Little(0);
+  reply.WriteS32Little(0);
+  reply.WriteS32Little((int32_t)awd->GetReunionPoints());
+  reply.WriteS32Little((int32_t)awd->GetMitamaReunionPoints());
+  targetClient->SendPacket(reply);
+
+  libcomp::String message = server->GetCustomMessage("RPOINT_CHANGED", "%1 の%2: %3 → %4")
+                                .Arg(targetCharacter->GetName())
+                                .Arg(pointName)
+                                .Arg(before)
+                                .Arg(after);
+  SendChatMessage(client, ChatType_t::CHAT_SELF, message);
+  if (targetClient != client) {
+    auto character = client->GetClientState()->GetCharacterState()->GetEntity();
+    SendChatMessage(targetClient, ChatType_t::CHAT_SELF,
+                    server->GetCustomMessage("RPOINT_CHANGED_TARGET",
+                                             "%1が %2 → %3 になりました（%4）")
+                        .Arg(pointName)
+                        .Arg(before)
+                        .Arg(after)
+                        .Arg(character ? character->GetName() : "GM"));
   }
 
   return true;

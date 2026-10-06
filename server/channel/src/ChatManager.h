@@ -568,6 +568,17 @@ class ChatManager {
       const std::list<libcomp::String>& args);
 
   /**
+   * GM command to show or change the reunion conversion points or the
+   * mitama points of a character's account.
+   * @param client Pointer to the client that sent the command
+   * @param args List of arguments for the command
+   * @return true if the command was handled properly, else false
+   */
+  bool GMCommand_ReunionPoints(
+      const std::shared_ptr<channel::ChannelClientConnection>& client,
+      const std::list<libcomp::String>& args);
+
+  /**
    * GM command to perform a demon reunion by changing its growth type.
    * @param client Pointer to the client that sent the command
    * @param args List of arguments for the command
