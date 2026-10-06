@@ -321,6 +321,13 @@ bool ServerConstants::Initialize(const String& filePath) {
                            sConstants.DEMON_FORCE_BULK);
   }
 
+  // Optional: @bag inventory page switching.
+  sConstants.INVENTORY_PAGES = 0;
+  if (constants.find("INVENTORY_PAGES") != constants.end()) {
+    success &=
+        LoadInteger(constants["INVENTORY_PAGES"], sConstants.INVENTORY_PAGES);
+  }
+
   // Load other constants
   success &= LoadInteger(constants["DIGITALIZE_COOLDOWN"],
                          sConstants.DIGITALIZE_COOLDOWN);

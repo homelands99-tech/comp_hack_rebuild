@@ -473,6 +473,10 @@ class ServerConstants {
     /// the client only ever uses one). Optional, defaults to off.
     uint16_t DEMON_FORCE_BULK;
 
+    /// If the @bag inventory page switching can be used, also by players
+    /// without GM privileges (1 = on, 0 = off). Optional, defaults to off.
+    uint8_t INVENTORY_PAGES;
+
     /// Default zone to move players when no other zone is found
     uint32_t ZONE_DEFAULT;
 

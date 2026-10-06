@@ -38,6 +38,9 @@
 // Standard C++11 Includes
 #include <math.h>
 
+#include <algorithm>
+#include <unordered_set>
+
 #include <limits>
 
 // object Includes
@@ -1784,6 +1787,431 @@ void CharacterManager::SendItemBoxData(
           client, objects::DemonQuest::Type_t::ITEM);
     }
   }
+}
+
+/**
+ * Create the storage boxes for the extra inventory pages if they do not exist
+ * yet (inventory boxes 1 to INVENTORY_PAGE_COUNT - 1).
+ * @param character Character to create the boxes for
+ * @param dbChanges Database changes to add the new boxes to
+ * @return true if any box was created
+ */
+static bool CreateInventoryPageBoxes(
+    const std::shared_ptr<objects::Character>& character,
+    const std::shared_ptr<libcomp::DatabaseChangeSet>& dbChanges) {
+  bool created = false;
+
+  for (size_t i = 1; i < CharacterManager::INVENTORY_PAGE_COUNT; i++) {
+    if (character->GetItemBoxes(i).Get()) {
+      continue;
+    }
+
+    auto box = libcomp::PersistentObject::New<objects::ItemBox>(true);
+    box->SetType(objects::ItemBox::Type_t::INVENTORY);
+    box->SetBoxID((int64_t)(i + 1));  // Page number stored in this box
+    box->SetAccount(character->GetAccount());
+    box->SetCharacter(character->GetUUID());
+
+    character->SetItemBoxes(i, box);
+    dbChanges->Insert(box);
+    created = true;
+  }
+
+  if (created) {
+    dbChanges->Update(character);
+  }
+
+  return created;
+}
+
+/**
+ * Work out which page the visible inventory holds: the one page number that
+ * is not stored in any of the page boxes.
+ * @param character Character with all page boxes created
+ * @return Current page number or 0 if the page boxes are inconsistent
+ */
+static uint8_t GetCurrentInventoryPage(
+    const std::shared_ptr<objects::Character>& character) {
+  std::set<int64_t> stored;
+  for (size_t i = 1; i < CharacterManager::INVENTORY_PAGE_COUNT; i++) {
+    auto box = character->GetItemBoxes(i).Get();
+    if (!box) {
+      return 0;
+    }
+
+    stored.insert(box->GetBoxID());
+  }
+
+  uint8_t current = 0;
+  for (uint8_t page = 1; page <= CharacterManager::INVENTORY_PAGE_COUNT;
+       page++) {
+    if (stored.find(page) == stored.end()) {
+      if (current) {
+        return 0;  // More than one page missing
+      }
+
+      current = page;
+    }
+  }
+
+  return current;
+}
+
+/**
+ * Check if an item always stays in the visible inventory when switching
+ * pages. Currency items (macca, macca notes, magnetite, mag pressers) are
+ * only counted and paid from the visible inventory, both by the server and
+ * by the client, so they must never be put away on another page.
+ * @param item Item to check
+ * @return true if the item is kept in the visible inventory
+ */
+static bool IsInventoryPageKeptItem(const std::shared_ptr<objects::Item>& item) {
+  auto type = item->GetType();
+  return type == SVR_CONST.ITEM_MACCA || type == SVR_CONST.ITEM_MACCA_NOTE ||
+         type == SVR_CONST.ITEM_MAGNETITE || type == SVR_CONST.ITEM_MAG_PRESSER;
+}
+
+/**
+ * Move the kept items (see IsInventoryPageKeptItem) from the stored page
+ * boxes into the visible inventory: first onto existing stacks of the same
+ * item, then into free slots. Items that do not fit stay where they are.
+ * @param character Character with all page boxes created
+ * @param inventory Visible inventory (box 0)
+ * @param definitionManager Definition manager for the stack sizes
+ * @param dbChanges Database changes to add the updates to
+ * @param changedSlots Output set of visible inventory slots that changed
+ * @return Number of kept items that could not be moved (no free slot)
+ */
+static size_t GatherInventoryPageKeptItems(
+    const std::shared_ptr<objects::Character>& character,
+    const std::shared_ptr<objects::ItemBox>& inventory,
+    libhack::DefinitionManager* definitionManager,
+    const std::shared_ptr<libcomp::DatabaseChangeSet>& dbChanges,
+    std::set<uint16_t>& changedSlots) {
+  const size_t slotCount = inventory->ItemsCount();
+  size_t leftOver = 0;
+
+  for (size_t i = 1; i < CharacterManager::INVENTORY_PAGE_COUNT; i++) {
+    auto box = character->GetItemBoxes(i).Get();
+    if (!box) {
+      continue;
+    }
+
+    bool boxChanged = false;
+    for (size_t slot = 0; slot < box->ItemsCount(); slot++) {
+      auto item = box->GetItems(slot).Get();
+      if (!item || !IsInventoryPageKeptItem(item)) {
+        continue;
+      }
+
+      auto def = definitionManager->GetItemData(item->GetType());
+      int32_t maxStack =
+          def ? (int32_t)def->GetPossession()->GetStackSize() : 1;
+
+      // Top up the existing stacks first
+      for (size_t tSlot = 0; tSlot < slotCount && item->GetStackSize() > 0;
+           tSlot++) {
+        auto target = inventory->GetItems(tSlot).Get();
+        if (!target || target->GetType() != item->GetType() ||
+            (int32_t)target->GetStackSize() >= maxStack) {
+          continue;
+        }
+
+        int32_t add = std::min(maxStack - (int32_t)target->GetStackSize(),
+                               (int32_t)item->GetStackSize());
+        target->SetStackSize((uint16_t)(target->GetStackSize() + add));
+        item->SetStackSize((uint16_t)(item->GetStackSize() - add));
+        dbChanges->Update(target);
+        changedSlots.insert((uint16_t)tSlot);
+      }
+
+      if (item->GetStackSize() == 0) {
+        // Fully merged
+        box->SetItems(slot, NULLUUID);
+        dbChanges->Delete(item);
+        boxChanged = true;
+        continue;
+      }
+
+      // Move what is left into a free slot
+      size_t freeSlot = 0;
+      while (freeSlot < slotCount && !inventory->GetItems(freeSlot).IsNull()) {
+        freeSlot++;
+      }
+
+      if (freeSlot < slotCount) {
+        box->SetItems(slot, NULLUUID);
+        inventory->SetItems(freeSlot, item);
+        item->SetItemBox(inventory->GetUUID());
+        item->SetBoxSlot((int8_t)freeSlot);
+        changedSlots.insert((uint16_t)freeSlot);
+        boxChanged = true;
+      } else {
+        leftOver++;
+      }
+
+      dbChanges->Update(item);
+    }
+
+    if (boxChanged) {
+      dbChanges->Update(box);
+    }
+  }
+
+  if (!changedSlots.empty()) {
+    dbChanges->Update(inventory);
+  }
+
+  return leftOver;
+}
+
+uint8_t CharacterManager::GetInventoryPages(
+    const std::shared_ptr<ChannelClientConnection>& client,
+    std::vector<uint8_t>& counts) {
+  auto state = client->GetClientState();
+  auto character = state->GetCharacterState()->GetEntity();
+  auto inventory = character ? character->GetItemBoxes(0).Get() : nullptr;
+  if (!inventory) {
+    return 0;
+  }
+
+  auto server = mServer.lock();
+  auto dbChanges = libcomp::DatabaseChangeSet::Create(state->GetAccountUID());
+  bool queue = CreateInventoryPageBoxes(character, dbChanges);
+
+  uint8_t current = GetCurrentInventoryPage(character);
+  if (!current) {
+    if (queue) {
+      server->GetWorldDatabase()->QueueChangeSet(dbChanges);
+    }
+
+    return 0;
+  }
+
+  // Bring back currency left on other pages (by older versions of this
+  // feature) so it can be used again
+  std::set<uint16_t> changedSlots;
+  GatherInventoryPageKeptItems(character, inventory,
+                               server->GetDefinitionManager(), dbChanges,
+                               changedSlots);
+  if (queue || !changedSlots.empty()) {
+    server->GetWorldDatabase()->QueueChangeSet(dbChanges);
+  }
+
+  if (!changedSlots.empty()) {
+    std::list<uint16_t> slots(changedSlots.begin(), changedSlots.end());
+    SendItemBoxData(client, inventory, slots);
+  }
+
+  counts.assign(INVENTORY_PAGE_COUNT, 0);
+  for (size_t i = 0; i < INVENTORY_PAGE_COUNT; i++) {
+    auto box = character->GetItemBoxes(i).Get();
+    uint8_t page = i == 0 ? current : (uint8_t)box->GetBoxID();
+
+    uint8_t count = 0;
+    for (auto item : box->GetItems()) {
+      if (!item.IsNull()) {
+        count++;
+      }
+    }
+
+    counts[(size_t)(page - 1)] = count;
+  }
+
+  return current;
+}
+
+bool CharacterManager::SwitchInventoryPage(
+    const std::shared_ptr<ChannelClientConnection>& client, uint8_t page,
+    libcomp::String& error) {
+  auto state = client->GetClientState();
+  auto character = state->GetCharacterState()->GetEntity();
+  auto inventory = character ? character->GetItemBoxes(0).Get() : nullptr;
+  if (!inventory) {
+    error = mServer.lock()->GetCustomMessage("BAG_NO_INVENTORY",
+                                             "インベントリが見つかりません。");
+    return false;
+  }
+
+  if (page < 1 || page > INVENTORY_PAGE_COUNT) {
+    error = mServer.lock()
+                ->GetCustomMessage("BAG_PAGE_RANGE",
+                                   "ページは 1 から %1 で指定してください。")
+                .Arg(INVENTORY_PAGE_COUNT);
+    return false;
+  }
+
+  // Moving items around during a trade or similar would break it.
+  if (state->GetExchangeSession()) {
+    error = mServer.lock()->GetCustomMessage(
+        "BAG_IN_TRADE", "取引中はページを切り替えられません。");
+    return false;
+  }
+
+  auto dbChanges = libcomp::DatabaseChangeSet::Create(state->GetAccountUID());
+  if (CreateInventoryPageBoxes(character, dbChanges)) {
+    // Save the new boxes right away: the checks below may return without
+    // switching and boxes that exist only in memory would be referenced by
+    // the character on logout, breaking the next login.
+    mServer.lock()->GetWorldDatabase()->QueueChangeSet(dbChanges);
+    dbChanges = libcomp::DatabaseChangeSet::Create(state->GetAccountUID());
+  }
+
+  uint8_t current = GetCurrentInventoryPage(character);
+  if (!current) {
+    error = mServer.lock()->GetCustomMessage(
+        "BAG_BROKEN", "ページの情報が壊れています。管理者に連絡してください。");
+    return false;
+  }
+
+  if (page == current) {
+    error = mServer.lock()
+                ->GetCustomMessage("BAG_ALREADY", "すでにページ %1 です。")
+                .Arg(page);
+    return false;
+  }
+
+  std::shared_ptr<objects::ItemBox> pageBox;
+  for (size_t i = 1; i < INVENTORY_PAGE_COUNT; i++) {
+    auto box = character->GetItemBoxes(i).Get();
+    if (box->GetBoxID() == (int64_t)page) {
+      pageBox = box;
+      break;
+    }
+  }
+
+  // Equipped items and currency (see IsInventoryPageKeptItem) stay in the
+  // visible inventory.
+  std::unordered_set<libobjgen::UUID> equipped;
+  for (auto equip : character->GetEquippedItems()) {
+    if (!equip.IsNull()) {
+      equipped.insert(equip.GetUUID());
+    }
+  }
+
+  const size_t slotCount = inventory->ItemsCount();
+
+  std::vector<std::shared_ptr<objects::Item>> outgoing(slotCount);
+  std::vector<std::shared_ptr<objects::Item>> staying(slotCount);
+  size_t stayingCount = 0;
+  for (size_t slot = 0; slot < slotCount; slot++) {
+    auto item = inventory->GetItems(slot).Get();
+    if (!item) {
+      continue;
+    }
+
+    if (equipped.find(item->GetUUID()) != equipped.end() ||
+        IsInventoryPageKeptItem(item)) {
+      staying[slot] = item;
+      stayingCount++;
+    } else {
+      outgoing[slot] = item;
+    }
+  }
+
+  std::list<std::pair<size_t, std::shared_ptr<objects::Item>>> incoming;
+  for (size_t slot = 0; slot < slotCount; slot++) {
+    auto item = pageBox->GetItems(slot).Get();
+    if (item) {
+      incoming.push_back(std::make_pair(slot, item));
+    }
+  }
+
+  if (incoming.size() + stayingCount > slotCount) {
+    error = mServer.lock()
+                ->GetCustomMessage(
+                    "BAG_NOT_ENOUGH_SLOTS",
+                    "装備中のアイテムと通貨（マッカ・マグネタイト）があるため、"
+                "ページ %1 のアイテムが入りきりません。"
+                "装備を外すか、ページ %1 のアイテムを減らしてください。")
+                .Arg(page);
+    return false;
+  }
+
+  // New visible inventory: equipped items keep their slots, the page's items
+  // keep theirs where possible and fill the first free slots otherwise.
+  std::vector<std::shared_ptr<objects::Item>> newInventory = staying;
+  std::list<std::shared_ptr<objects::Item>> displaced;
+  for (auto& pair : incoming) {
+    if (!newInventory[pair.first]) {
+      newInventory[pair.first] = pair.second;
+    } else {
+      displaced.push_back(pair.second);
+    }
+  }
+
+  size_t freeSlot = 0;
+  for (auto& item : displaced) {
+    while (newInventory[freeSlot]) {
+      freeSlot++;
+    }
+
+    newInventory[freeSlot] = item;
+  }
+
+  // Apply the new contents to both boxes.
+  for (size_t slot = 0; slot < slotCount; slot++) {
+    auto item = newInventory[slot];
+    inventory->SetItems(slot, item);
+    if (item && (item->GetItemBox() != inventory->GetUUID() ||
+                 item->GetBoxSlot() != (int8_t)slot)) {
+      item->SetItemBox(inventory->GetUUID());
+      item->SetBoxSlot((int8_t)slot);
+      dbChanges->Update(item);
+    }
+
+    item = outgoing[slot];
+    pageBox->SetItems(slot, item);
+    if (item) {
+      item->SetItemBox(pageBox->GetUUID());
+      item->SetBoxSlot((int8_t)slot);
+      dbChanges->Update(item);
+    }
+  }
+
+  // The page box now holds the page that was visible until now.
+  pageBox->SetBoxID((int64_t)current);
+
+  dbChanges->Update(inventory);
+  dbChanges->Update(pageBox);
+
+  // Bring currency left on the other pages (by older versions of this
+  // feature) into the visible inventory as well.
+  auto server = mServer.lock();
+  std::set<uint16_t> gathered;
+  size_t leftOver = GatherInventoryPageKeptItems(
+      character, inventory, server->GetDefinitionManager(), dbChanges,
+      gathered);
+  if (leftOver) {
+    // Not an error: the switch itself worked
+    error = server
+                ->GetCustomMessage(
+                    "BAG_CURRENCY_LEFT",
+                    "空き枠が足りず、他のページのマッカ・マグネタイトを %1 個"
+                "移せませんでした。空きを作ってから @bag を実行してください。")
+                .Arg((uint32_t)leftOver);
+  }
+
+  server->GetWorldDatabase()->QueueChangeSet(dbChanges);
+
+  // Send every slot as an update (in two halves so the packets stay in update
+  // mode) so the client also clears the slots that are now empty.
+  std::list<uint16_t> firstHalf, secondHalf;
+  for (uint16_t slot = 0; slot < (uint16_t)slotCount; slot++) {
+    (slot < slotCount / 2 ? firstHalf : secondHalf).push_back(slot);
+  }
+
+  SendItemBoxData(client, inventory, firstHalf, false);
+  SendItemBoxData(client, inventory, secondHalf, false);
+
+  // Item counts for demon quests may have changed.
+  auto dQuest = character->GetDemonQuest().Get();
+  if (dQuest && dQuest->GetType() == objects::DemonQuest::Type_t::ITEM) {
+    server->GetEventManager()->UpdateDemonQuestCount(
+        client, objects::DemonQuest::Type_t::ITEM);
+  }
+
+  return true;
 }
 
 std::list<std::shared_ptr<objects::Item>> CharacterManager::GetExistingItems(
