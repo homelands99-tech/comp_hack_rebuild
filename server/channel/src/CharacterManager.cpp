@@ -1533,6 +1533,11 @@ bool CharacterManager::SummonSubDemon(
     // Attack as soon as it has a target (the species' AI may only fight
     // back) and pick skills by the normal logic
     aiState->SetStrikeFirst(true);
+
+    // Species AI scripts (typical for healers) take over the action
+    // choice and would skip the companion logic, so do not use them
+    aiState->ClearActionOverrides();
+    aiState->SetScript(nullptr);
     aiState->SetNormalSkillUse(true);
   }
 
