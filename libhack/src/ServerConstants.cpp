@@ -342,6 +342,43 @@ bool ServerConstants::Initialize(const String& filePath) {
                            sConstants.REUNION_BULK_COST);
   }
 
+  // Optional: player level cap above the world level cap (up to 127).
+  sConstants.PLAYER_LEVEL_CAP = 0;
+  sConstants.PLAYER_LEVEL_XP.clear();
+  if (constants.find("PLAYER_LEVEL_XP") != constants.end()) {
+    String xpStr;
+    if (LoadString(constants["PLAYER_LEVEL_XP"], xpStr)) {
+      for (auto part : xpStr.Split(",")) {
+        bool ok = false;
+        int64_t xp = part.Trimmed().ToInteger<int64_t>(&ok);
+        if (!ok || xp <= 0) {
+          LogServerConstantsErrorMsg(
+              "PLAYER_LEVEL_XP must be a list of numbers above 0\n");
+          success = false;
+          break;
+        }
+
+        sConstants.PLAYER_LEVEL_XP.push_back((uint64_t)xp);
+      }
+    }
+  }
+
+  if (constants.find("PLAYER_LEVEL_CAP") != constants.end()) {
+    success &= LoadInteger(constants["PLAYER_LEVEL_CAP"],
+                           sConstants.PLAYER_LEVEL_CAP);
+    uint8_t cap = sConstants.PLAYER_LEVEL_CAP;
+    if (cap > 127) {
+      LogServerConstantsErrorMsg("PLAYER_LEVEL_CAP must be 127 or less\n");
+      success = false;
+    } else if (cap > 99 &&
+               (size_t)(cap - 99) > sConstants.PLAYER_LEVEL_XP.size()) {
+      LogServerConstantsErrorMsg(
+          "PLAYER_LEVEL_XP needs one value per level above 99 up to "
+          "PLAYER_LEVEL_CAP\n");
+      success = false;
+    }
+  }
+
   // Load other constants
   success &= LoadInteger(constants["DIGITALIZE_COOLDOWN"],
                          sConstants.DIGITALIZE_COOLDOWN);

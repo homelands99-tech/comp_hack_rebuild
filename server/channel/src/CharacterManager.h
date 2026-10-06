@@ -1053,6 +1053,22 @@ class CharacterManager {
       int64_t xp, int32_t entityID);
 
   /**
+   * Get the highest level a character or demon can reach: the world level
+   * cap, or PLAYER_LEVEL_CAP for characters when it is set.
+   * @param character true for a character, false for a demon
+   * @return Level cap
+   */
+  int8_t GetLevelCap(bool character);
+
+  /**
+   * Get the experience needed to go from a level to the next one. Levels
+   * from 99 up use PLAYER_LEVEL_XP.
+   * @param level Current level
+   * @return Experience needed for the next level, 0 if not defined
+   */
+  static int64_t GetLevelXP(int8_t level);
+
+  /**
    * Increase the level of a client's character or demon.
    * @param client Pointer to the client connection
    * @param level Number of levels to gain

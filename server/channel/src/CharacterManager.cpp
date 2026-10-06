@@ -880,7 +880,8 @@ void CharacterManager::ReviveCharacter(
   std::unordered_map<std::shared_ptr<ActiveEntityState>, int32_t> hpRestores;
   uint32_t baseItemID = 0;
 
-  bool xpLossLevel = characterLevel >= 10 && characterLevel < 99;
+  bool xpLossLevel =
+      characterLevel >= 10 && characterLevel < GetLevelCap(true);
   bool triggerRespawn = false;
   switch (revivalMode) {
     case REVIVE_HOMEPOINT:
@@ -1156,7 +1157,7 @@ bool CharacterManager::UpdateRevivalXP(
   int8_t lvl = cs->GetLevel();
 
   int64_t xpLoss =
-      (int64_t)floorl((double)libhack::LEVEL_XP_REQUIREMENTS[(size_t)lvl] *
+      (int64_t)floorl((double)GetLevelXP(lvl) *
                           (double)lossPercent -
                       0.01);
   if (xpAdjust < 100.0) {
@@ -3649,7 +3650,7 @@ bool CharacterManager::UpdateDurability(
   }
 
   if (decayTokusei.size() > 0 &&
-      cState->GetLevel() < server->GetWorldSharedConfig()->GetLevelCap()) {
+      cState->GetLevel() < GetLevelCap(true)) {
     // Grant XP from item decay based on current level
     int32_t level = (int32_t)cState->GetLevel();
     for (auto& pair : decayTokusei) {
@@ -4071,7 +4072,7 @@ bool CharacterManager::ReunionDemon(
         keepXP = cs->GetXP();
 
         for (int8_t i = 1; i < lvl; i++) {
-          keepXP = keepXP + (int64_t)libhack::LEVEL_XP_REQUIREMENTS[(size_t)i];
+          keepXP = keepXP + GetLevelXP(i);
         }
 
         keepXP = (int64_t)floorl((double)keepXP * (double)stacks * 0.01);
@@ -4086,7 +4087,7 @@ bool CharacterManager::ReunionDemon(
 
         int8_t lvl = 1;
         while (lvl < levelCap && keepXP > 0) {
-          int64_t req = (int64_t)libhack::LEVEL_XP_REQUIREMENTS[(size_t)lvl];
+          int64_t req = GetLevelXP(lvl);
           if (req <= keepXP) {
             lvl = (int8_t)(lvl + 1);
             keepXP = (int64_t)(keepXP - req);
@@ -5115,7 +5116,7 @@ bool CharacterManager::UpdateExperience(
     return false;
   }
 
-  const static int8_t levelCap = server->GetWorldSharedConfig()->GetLevelCap();
+  const int8_t levelCap = GetLevelCap(eState == cState);
 
   int8_t level = stats->GetLevel();
   if (level >= levelCap) {
@@ -5139,8 +5140,8 @@ bool CharacterManager::UpdateExperience(
   int64_t xpDelta = stats->GetXP() + xp;
   int64_t xpCurrent = xpDelta;
   while (level < levelCap &&
-         xpDelta >= (int64_t)libhack::LEVEL_XP_REQUIREMENTS[level]) {
-    xpDelta = xpDelta - (int64_t)libhack::LEVEL_XP_REQUIREMENTS[level++];
+         xpDelta >= GetLevelXP(level)) {
+    xpDelta = xpDelta - GetLevelXP(level++);
   }
 
   if (level == levelCap) {
@@ -5372,10 +5373,33 @@ bool CharacterManager::UpdateExperience(
   return true;
 }
 
+int8_t CharacterManager::GetLevelCap(bool character) {
+  auto server = mServer.lock();
+  int8_t cap = server->GetWorldSharedConfig()->GetLevelCap();
+  if (character && SVR_CONST.PLAYER_LEVEL_CAP) {
+    cap = (int8_t)SVR_CONST.PLAYER_LEVEL_CAP;
+  }
+
+  return cap;
+}
+
+int64_t CharacterManager::GetLevelXP(int8_t level) {
+  if (level < 0) {
+    return 0;
+  } else if (level < 99) {
+    return (int64_t)libhack::LEVEL_XP_REQUIREMENTS[(size_t)level];
+  }
+
+  size_t idx = (size_t)(level - 99);
+  return idx < SVR_CONST.PLAYER_LEVEL_XP.size()
+             ? (int64_t)SVR_CONST.PLAYER_LEVEL_XP[idx]
+             : 0;
+}
+
 void CharacterManager::LevelUp(
     const std::shared_ptr<channel::ChannelClientConnection>& client,
     int8_t level, int32_t entityID) {
-  if (level < 2 || level > 99) {
+  if (level < 2) {
     return;
   }
 
@@ -5389,9 +5413,9 @@ void CharacterManager::LevelUp(
   int64_t xpGain = 0;
   for (int8_t i = stats->GetLevel(); i < level; i++) {
     if (xpGain == 0) {
-      xpGain += (int64_t)libhack::LEVEL_XP_REQUIREMENTS[i] - stats->GetXP();
+      xpGain += GetLevelXP(i) - stats->GetXP();
     } else {
-      xpGain += (int64_t)libhack::LEVEL_XP_REQUIREMENTS[i];
+      xpGain += GetLevelXP(i);
     }
   }
 
@@ -5647,11 +5671,13 @@ int32_t CharacterManager::GetMaxExpertisePoints(
     const std::shared_ptr<objects::Character>& character) {
   auto stats = character->GetCoreStats();
 
-  int32_t maxPoints =
-      MIN_EXPERTISE_POINTS +
-      (int32_t)(floorl((float)stats->GetLevel() * 0.1) * 1000 * 100);
+  // Levels above 99 (PLAYER_LEVEL_CAP) count as 99
+  int8_t level = stats->GetLevel() > 99 ? 99 : stats->GetLevel();
 
-  if (stats->GetLevel() == 99) {
+  int32_t maxPoints = MIN_EXPERTISE_POINTS +
+                      (int32_t)(floorl((float)level * 0.1) * 1000 * 100);
+
+  if (level == 99) {
     // Level 99 awards a bonus 1000.00 points available
     maxPoints = maxPoints + 100000;
   }
