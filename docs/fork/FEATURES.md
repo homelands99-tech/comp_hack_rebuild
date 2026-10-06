@@ -46,10 +46,19 @@ CP で引き、景品は宅配に届きます。ショップ XML の `Type` を 
 
 詳しくは [GACHA.md](GACHA.md) を見てください。
 
+### 設定 ###
+
+```xml
+<constant name="GACHA_ENABLED">1</constant>
+```
+
+`0` または行が無い場合は無効です（`GACHA` のショップは一覧に出ません）。
+
 *English: Restores the client's gacha window. Shops with `Type` `GACHA` are
 listed in the COMP shop menu (needs a client that supports it, not public); drawing charges CP and
 sends a weighted random prize to the post. Toggle with `@gacha` or tab
-conditions. See GACHA.md.*
+conditions. Enable with `GACHA_ENABLED` = 1 in constants.xml. See GACHA.md.*
+
 ## デモンフォースのまとめ使い / Bulk demon force ##
 
 悪魔にフォース用アイテムを使うとき、1回の使用で同じアイテムを複数個まとめて
@@ -197,3 +206,74 @@ at once, paying N x `REUNION_BULK_COST` macca, N level keeping items and N rank
 characters only; demons keep the world level cap. `PLAYER_LEVEL_XP` lists the
 experience needed for each level from 99 up. Both are read at startup, so the
 cap can be raised step by step.*
+
+## インベントリのページ切り替え（@bag） / Inventory pages ##
+
+インベントリ（50 枠）を 5 ページに増やします。見えているのは 1 ページ分だけで、
+チャットの `@bag` でページを切り替えます（クライアントの変更は不要です）。
+
+- `@bag`: 各ページのアイテム数と今のページを表示
+- `@bag ページ番号`（1〜5）: そのページに切り替え。装備中のアイテムとマッカ・マグネタイトは
+  どのページでも見える場所に残ります。
+- 取引中は切り替えられません。装備と通貨で枠が足りないときは切り替わりません（何も変わりません）。
+- 残りの 4 ページは、キャラクターごとに追加のアイテム箱（`ItemBox`）として保存されます
+  （初めて `@bag` を使ったときに作られます。データベースの構造は変更しません）。
+- 有効なときは一般プレイヤーも使えます。
+
+### 設定 ###
+
+```xml
+<constant name="INVENTORY_PAGES">1</constant>
+```
+
+`0` または行が無い場合は無効です（`@bag` は「無効です」と答えるだけ）。
+
+### 関係するソース ###
+
+- `libhack/src/ServerConstants.h/.cpp`: `INVENTORY_PAGES`（省略可能）
+- `server/channel/src/CharacterManager.h/.cpp`: `GetInventoryPages()`、`SwitchInventoryPage()`
+- `server/channel/src/ChatManager.h/.cpp`: `@bag`
+
+*English: With `INVENTORY_PAGES` = 1, `@bag [1-5]` switches the visible
+inventory between 5 pages stored as extra item boxes; equipped items and
+currency stay visible on every page. Open to players while enabled.*
+
+## 転生ポイントの GM コマンド（@rpoint） / Reunion points GM command ##
+
+GM コマンド `@rpoint [mitama] [[+|-]数] [キャラクター名]` で、リユニオン変換ポイント
+（`mitama` を付けると御霊ポイント）を表示・変更します。
+
+- 数を付けないと表示だけ。`+数` で足す、`-数` で引く、数だけならその値にする。
+- キャラクター名を付けると、そのキャラクター（同じチャンネルにログイン中のみ）のアカウントの
+  ポイントを扱います。ポイントはアカウント単位なので、同じアカウントの他のキャラクターにも反映されます。
+- 権限は `GM_CMD_LVL_REUNION`（`constants.xml`）です。設定の追加はありません。
+
+*English: `@rpoint [mitama] [[+|-]VALUE] [NAME]` shows or changes the reunion
+conversion points (or mitama points) of a character's account; the character
+must be online on the same channel.*
+
+## 追加機能の文言（custom_messages） / Texts of the added features ##
+
+追加した機能がプレイヤーに出す文言（チャット欄のメッセージ・GM コマンドの表示）は、
+サーバーのデータ `datastore/data/custom_messages.xml` で変えられます（サーバーの再起動で反映）。
+
+```xml
+<objects>
+    <object name="CustomMessage">
+        <member name="ID">MATERIAL_TANK_STORED</member>
+        <member name="Text">原料タンクに %1 を %2 個収納しました。（計 %3）</member>
+        <member name="DefaultText">原料タンクに %1 を %2 個収納しました。（計 %3）</member>
+        <member name="Note">説明（サーバーは読まない）</member>
+    </object>
+</objects>
+```
+
+- `Text` が文言です。`%1`・`%2` などには数や名前が入ります。
+- ファイルが無い・その ID が無い・`Text` が空のときは、ソースに書いてある文言（`DefaultText` と同じ）を使います。
+- `data/custom_messages/` フォルダに複数のファイルを置くこともできます（ファイルが 1 つも無いときだけ
+  `data/custom_messages.xml` を読みます）。
+- 追加する機能の文言は、ソースでは `ChannelServer::GetCustomMessage("ID", "文言")` で出します。
+
+*English: Texts shown to players by the added features can be overridden in
+`data/custom_messages.xml` (CustomMessage ID / Text). Without an entry the
+default from the source is used.*
