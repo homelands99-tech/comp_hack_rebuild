@@ -37,86 +37,47 @@ rest goes to the inventory). Loot that fits in the tank can be picked up even
 with a full inventory. Enable with `AUTO_MATERIAL_TANK` = 1 in
 constants.xml.*
 
-## ガチャ画面の復活 / Gacha ##
+## サブ召喚（2 体目の仲魔・ミニオン） / Sub summon (second demon, minions) ##
 
-クライアントに残っているガチャ画面を、COMP ショップの一覧から開けるようにします。
-CP で引き、景品は宅配に届きます。ショップ XML の `Type` を `GACHA` にしたときだけ動き、
-対応したクライアント（非公開）が必要です。GM コマンド `@gacha` やタブの条件で、表示・非表示と
-景品の切り替えができます。
+COMP の仲魔をもう 1 体、AI で動く味方として連れて歩けます（2 体目）。
+アイテムやスキルで決まった型の悪魔（ミニオン）を呼ぶこともできます。
 
-詳しくは [GACHA.md](GACHA.md) を見てください。
+- 2 体目: NPC の会話で「今召喚している仲魔」を登録し、機能番号 `SKILL_SUB_DEMON` のスキルで呼ぶ・戻す。
+  キャラごとに「1 体目を召喚したら自動で呼ぶ」を ON にできる（NPC の会話で切り替え）。
+- 2 体目はプレイヤーの後ろを付いて歩き、プレイヤーの敵と戦い、回復・補助・蘇生をする。
+  行動の数値は AI スクリプト `scripts/AI/ai_subdemon.nut`（名前 `subDemon`）の `settings` で決める。
+- 2 体目が倒されると COMP の仲魔の HP は 0 になる。格納・削除・召喚したときは自動で戻る。
+- ミニオン: `data/minions.xml` の型（置物の補助役 SUPPORT / 戦う FIGHTER）を、
+  機能番号 `SKILL_MINION` のスキル（特別な値 1 番目 = 型の番号）やアイテムで呼ぶ。
+- 2 体目・ミニオンの与えたダメージはプレイヤーのものとして数える。
+- データベース: `Character` に `SubDemon`（登録した仲魔）と `SubDemonAuto` を追加（world の起動時に列が足される）。
 
 ### 設定 ###
 
 ```xml
-<constant name="GACHA_ENABLED">1</constant>
+<constant name="SUB_DEMON_ENABLED">1</constant>   <!-- 2 体目を使う -->
+<constant name="SKILL_SUB_DEMON">1600</constant>  <!-- 2 体目を呼ぶスキルの機能番号 -->
+<constant name="MINION_ENABLED">1</constant>      <!-- ミニオンを使う -->
+<constant name="SKILL_MINION">1601</constant>     <!-- ミニオンを呼ぶスキルの機能番号 -->
+<constant name="SUB_MINION_TOGETHER">0</constant> <!-- 1 = 2 体目とミニオンを同時に出せる -->
 ```
 
-`0` または行が無い場合は無効です（`GACHA` のショップは一覧に出ません）。
-
-*English: Restores the client's gacha window. Shops with `Type` `GACHA` are
-listed in the COMP shop menu (needs a client that supports it, not public); drawing charges CP and
-sends a weighted random prize to the post. Toggle with `@gacha` or tab
-conditions. Enable with `GACHA_ENABLED` = 1 in constants.xml. See GACHA.md.*
-
-## デモンフォースのまとめ使い / Bulk demon force ##
-
-悪魔にフォース用アイテムを使うとき、1回の使用で同じアイテムを複数個まとめて
-消費します（クライアントの変更は不要です）。
-
-### フォースの仕組み（元の動作） ###
-
-- アイテム1個で、20種類の能力値フォース（HP最大・力・経験値など）に少しずつ
-  ポイントが入ります。100,000 ポイントで能力値 +1 です（`DEMON_FORCE_PRECISION`）。
-  上限はアイテムごとに `DevilBoostData` の結果欄で決まります。
-- アイテム1個でベネフィットゲージが +1 されます。ゲージが 10・30・60、その後は
-  100 ごと（`DevilBoostLotData`）になると、パッシブ（`DevilBoostExtraData` の特性）
-  の候補が抽選で1つ出ます。候補を枠（最大8枠）に入れるか捨てるまで、次のアイテムは
-  使えません。
-- 特定のパッシブを直接枠に入れるアイテムもあります。
-
-### まとめ使いの動作 ###
-
-- 1回の使用で最大 N 個を続けて使います。次の場合はその時点で止まります。
-  - パッシブの候補が出たとき（いつもの選択画面が出ます）
-  - 能力値フォースがそのアイテムの上限に達したとき
-  - 持っているアイテムが無くなったとき（同じアイテムの別の山からも使います）
-- 枠に直接入れるアイテムは、今までどおり1個ずつです。
-- ゲージだけを上げるアイテム（「契の玉・回」など）もまとめて使われ、パッシブ候補が出るか、
-  アイテムが無くなるまで続きます。
-
-### `@force` コマンド ###
-
-有効なときは一般プレイヤーも使えます。
-
-- `@force`: 召喚中の悪魔のゲージ、次のパッシブ候補までの残り個数、各フォースの値を表示
-- `@force 個数`: 1回で使う個数を設定（1〜上限。ログアウトすると上限に戻ります）
-- `@force max`: 上限に戻す
-- `@force effect off` / `on`: ゲージ満タン時の悪魔のエフェクトを出さない / 出す（ログアウトで「出す」に戻ります）。
-  画面の画像表示と約4秒の待ち時間はクライアント側の演出なので変わりません
-
-### 設定 ###
-
-`config/constants.xml` に次の行を追加すると有効になります。数字は1回で使う上限です。
-
-```xml
-<constant name="DEMON_FORCE_BULK">100</constant>
-```
-
-`0`・`1` または行が無い場合は無効です（1個ずつ、`@force` は GM のみ）。
+どれも省略可能で、省略または `0` なら無効です。
 
 ### 関係するソース ###
 
-- `libhack/src/ServerConstants.h/.cpp`: `DEMON_FORCE_BULK`（省略可能）
-- `server/channel/schema/clientstate.xml`: `DemonForceBulk`（`@force` で決めた個数、保存しない）
-- `server/channel/src/packets/game/DemonForce.cpp`: まとめ使いの処理
-- `server/channel/src/ChatManager.h/.cpp`: `@force`
+- `libhack/schema/character.xml`: `SubDemon`、`SubDemonAuto`
+- `libhack/schema/demon.xml`: `MinionData`（`data/minions.xml`）
+- `server/channel/src/CharacterManager.h/.cpp`: `RegisterSubDemon()`（スクリプトから使う）、`ToggleSubDemon()`、
+  `SummonSubDemon()`、`DismissSubDemon()`、`AutoSummonSubDemon()`、`SummonMinion()` など
+- `server/channel/src/AIManager.cpp`: 付いて歩く・回復・補助・蘇生（`CompanionFollow()`、`PrepareCompanionSkill()`）
+- `server/channel/src/SkillManager.cpp`: スキルの機能 `SubDemon()`・`Minion()`
+- GM コマンド: `@sub`、`@minion`
 
-*English: With `DEMON_FORCE_BULK` = N in constants.xml, one demon force use
-consumes up to N of the same item, stopping when a new force stack effect
-becomes pending, when nothing would be raised, or when the items run out.
-`@force` (open to players while enabled) shows the gauge, uses left until the
-next stack effect and the force values, and sets the per-use count.*
+*English: Players can register a COMP demon at an NPC (event script calling
+`CharacterManager::RegisterSubDemon`) and bring it out as an AI ally with the
+`SKILL_SUB_DEMON` skill. Minion types in `data/minions.xml` can be summoned
+with the `SKILL_MINION` skill. Enable with `SUB_DEMON_ENABLED` / `MINION_ENABLED`.*
 
 ## 追加機能の文言（custom_messages） / Texts of the added features ##
 

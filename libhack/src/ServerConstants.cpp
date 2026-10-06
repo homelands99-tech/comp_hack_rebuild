@@ -335,6 +335,13 @@ bool ServerConstants::Initialize(const String& filePath) {
         LoadInteger(constants["GACHA_ENABLED"], sConstants.GACHA_ENABLED);
   }
 
+  // Optional: bulk reunion cost per rank (0 = off).
+  sConstants.REUNION_BULK_COST = 0;
+  if (constants.find("REUNION_BULK_COST") != constants.end()) {
+    success &= LoadInteger(constants["REUNION_BULK_COST"],
+                           sConstants.REUNION_BULK_COST);
+  }
+
   // Load other constants
   success &= LoadInteger(constants["DIGITALIZE_COOLDOWN"],
                          sConstants.DIGITALIZE_COOLDOWN);
@@ -962,6 +969,51 @@ bool ServerConstants::Initialize(const String& filePath) {
   } else {
     LogServerConstantsErrorMsg("REUNION_EXTRACT_ITEMS not found\n");
     return false;
+  }
+
+  // Optional: bulk reunion item lists
+  sConstants.REUNION_BULK_KEEP_ITEMS = {21894, 21907};
+  complexIter = complexConstants.find("REUNION_BULK_KEEP_ITEMS");
+  if (complexIter != complexConstants.end()) {
+    std::list<String> strList;
+    sConstants.REUNION_BULK_KEEP_ITEMS.clear();
+    if (!LoadStringList(complexIter->second, strList)) {
+      LogServerConstantsErrorMsg("Failed to load REUNION_BULK_KEEP_ITEMS\n");
+      return false;
+    }
+
+    for (auto elem : strList) {
+      uint32_t id = 0;
+      if (!LoadInteger(elem.C(), id)) {
+        LogServerConstantsErrorMsg(
+            "Failed to load an entry in REUNION_BULK_KEEP_ITEMS\n");
+        return false;
+      }
+
+      sConstants.REUNION_BULK_KEEP_ITEMS.push_back(id);
+    }
+  }
+
+  sConstants.REUNION_BULK_LAST_ITEMS = {21590};
+  complexIter = complexConstants.find("REUNION_BULK_LAST_ITEMS");
+  if (complexIter != complexConstants.end()) {
+    std::list<String> strList;
+    sConstants.REUNION_BULK_LAST_ITEMS.clear();
+    if (!LoadStringList(complexIter->second, strList)) {
+      LogServerConstantsErrorMsg("Failed to load REUNION_BULK_LAST_ITEMS\n");
+      return false;
+    }
+
+    for (auto elem : strList) {
+      uint32_t id = 0;
+      if (!LoadInteger(elem.C(), id)) {
+        LogServerConstantsErrorMsg(
+            "Failed to load an entry in REUNION_BULK_LAST_ITEMS\n");
+        return false;
+      }
+
+      sConstants.REUNION_BULK_LAST_ITEMS.insert(id);
+    }
   }
 
   complexIter = complexConstants.find("ROLLBACK_PG_ITEMS");

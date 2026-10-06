@@ -809,6 +809,24 @@ class CharacterManager {
                     int8_t forceRank = -1);
 
   /**
+   * Raise one reunion rank group of the summoned mitama demon by several
+   * ranks at once without the level reset (for events, REUNION_BULK_COST).
+   * Every rank costs REUNION_BULK_COST macca, one level keeping item
+   * (REUNION_BULK_KEEP_ITEMS) and one set of the rank 9 reunion materials of
+   * the group (the materials needed most are used first, the shared ones in
+   * REUNION_BULK_LAST_ITEMS last). The growth type is not changed. Nothing
+   * is written to the chat; events show the numbers in their messages.
+   * @param cState Pointer to the character state
+   * @param groupIdx Reunion group index (0-11, Tiwaz to Wyrd)
+   * @param count Ranks to raise, 0 for as many as can be paid or -1 to only
+   *  calculate how many ranks can be paid
+   * @return Ranks raised (with -1 as count: ranks that can be paid), 0 if
+   *  nothing was raised or -1 on an error
+   */
+  int32_t ReunionBulk(const std::shared_ptr<CharacterState>& cState,
+                      int8_t groupIdx, int32_t count);
+
+  /**
    * Get the total number of reunion ranks achieved by the supplied demon
    * @param demon Pointer to the demon
    * @return Total number of reunion ranks achieved

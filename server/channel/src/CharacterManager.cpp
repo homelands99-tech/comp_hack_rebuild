@@ -145,7 +145,8 @@ BaseScriptEngine& BaseScriptEngine::Using<CharacterManager>() {
                                          uint8_t, int8_t)>(
             "DoMitamaReunion", &CharacterManager::DoMitamaReunion)
         .Func("GetMitamaReunionDetails",
-              &CharacterManager::GetMitamaReunionDetails);
+              &CharacterManager::GetMitamaReunionDetails)
+        .Func("ReunionBulk", &CharacterManager::ReunionBulk);
 
     Bind<CharacterManager>("CharacterManager", binding);
   }
@@ -4158,6 +4159,209 @@ bool CharacterManager::ReunionDemon(
   client->FlushOutgoing();
 
   return success;
+}
+
+int32_t CharacterManager::ReunionBulk(
+    const std::shared_ptr<CharacterState>& cState, int8_t groupIdx,
+    int32_t count) {
+  auto server = mServer.lock();
+  auto definitionManager = server->GetDefinitionManager();
+  auto client = cState ? server->GetManagerConnection()->GetEntityClient(
+                             cState->GetEntityID(), false)
+                       : nullptr;
+  if (!client) {
+    return -1;
+  }
+
+  const uint32_t costPerRank = SVR_CONST.REUNION_BULK_COST;
+  if (!costPerRank) {
+    return -1;
+  }
+
+  auto state = client->GetClientState();
+  auto dState = state->GetDemonState();
+  auto demon = dState->GetEntity();
+  auto devilData = dState->GetDevilData();
+  auto character = cState->GetEntity();
+  auto inventory = character ? character->GetItemBoxes(0).Get() : nullptr;
+  if (!demon || !devilData || !inventory || !IsMitamaDemon(devilData)) {
+    return -1;
+  }
+
+  if (groupIdx < 0 || groupIdx >= 12) {
+    return -1;
+  }
+
+  for (int8_t rank : demon->GetReunion()) {
+    if (rank < 8) {
+      return -1;
+    }
+  }
+
+  // Ranks above 9 cost the rank 9 materials of the group
+  std::shared_ptr<objects::MiDevilLVUpRateData> growthData;
+  for (auto& pair : definitionManager->GetAllDevilLVUpRateData()) {
+    if (pair.second->GetGroupID() == (int8_t)(groupIdx + 1) &&
+        pair.second->GetSubID() == 9) {
+      growthData = pair.second;
+      break;
+    }
+  }
+
+  if (!growthData) {
+    return -1;
+  }
+
+  uint8_t maxRank = server->GetWorldSharedConfig()->GetReunionMax();
+  int8_t current = demon->GetReunion((size_t)groupIdx);
+  int32_t room = maxRank > current ? (int32_t)(maxRank - current) : 0;
+
+  // Any one material set pays for a rank. Use the ones needed most first,
+  // the shared materials (REUNION_BULK_LAST_ITEMS) last.
+  std::list<std::pair<uint32_t, uint16_t>> materials;
+  for (auto con : growthData->GetReunionConditions()) {
+    uint32_t itemID = con->GetItemID();
+    uint16_t amount = con->GetAmount();
+    if (itemID && amount) {
+      materials.push_back(std::make_pair(itemID, amount));
+    }
+  }
+
+  auto isLast = [](uint32_t itemID) {
+    return SVR_CONST.REUNION_BULK_LAST_ITEMS.find(itemID) !=
+           SVR_CONST.REUNION_BULK_LAST_ITEMS.end();
+  };
+
+  materials.sort([&isLast](const std::pair<uint32_t, uint16_t>& a,
+                           const std::pair<uint32_t, uint16_t>& b) {
+    bool aLast = isLast(a.first);
+    bool bLast = isLast(b.first);
+    return aLast != bLast ? !aLast : a.second > b.second;
+  });
+
+  bool compressible = true;
+  uint64_t macca =
+      GetTotalInInventory(character, SVR_CONST.ITEM_MACCA, compressible);
+  int32_t byMacca = (int32_t)std::min<uint64_t>(macca / costPerRank, 10000);
+
+  // The same item may be listed more than once; count it once and pay it
+  // once (two removals of the same item would overwrite each other)
+  std::list<uint32_t> keepItemIDs;
+  for (uint32_t itemID : SVR_CONST.REUNION_BULK_KEEP_ITEMS) {
+    if (std::find(keepItemIDs.begin(), keepItemIDs.end(), itemID) ==
+        keepItemIDs.end()) {
+      keepItemIDs.push_back(itemID);
+    }
+  }
+
+  uint32_t keepItems = 0;
+  for (uint32_t itemID : keepItemIDs) {
+    keepItems += GetExistingItemCount(character, itemID, inventory);
+  }
+
+  int32_t byKeep = (int32_t)std::min<uint32_t>(keepItems, 10000);
+
+  int32_t byMaterials = 0;
+  std::list<std::pair<std::pair<uint32_t, uint16_t>, int32_t>> materialUses;
+  for (auto& m : materials) {
+    uint32_t owned = GetExistingItemCount(character, m.first, inventory);
+    int32_t uses = (int32_t)std::min<uint32_t>(owned / m.second, 10000);
+    byMaterials += uses;
+    materialUses.push_back(std::make_pair(m, uses));
+  }
+
+  int32_t possible = std::min(std::min(room, byMacca),
+                              std::min(byKeep, byMaterials));
+
+  if (count < 0) {
+    return possible;
+  }
+
+  int32_t raise = count == 0 ? possible : count;
+  if (raise <= 0 || raise > possible) {
+    return 0;
+  }
+
+  // Pay everything at once
+  std::list<std::shared_ptr<objects::Item>> inserts;
+  std::unordered_map<std::shared_ptr<objects::Item>, uint16_t> cost;
+
+  std::unordered_map<uint32_t, uint64_t> maccaCost;
+  maccaCost[SVR_CONST.ITEM_MACCA] = (uint64_t)raise * costPerRank;
+  bool success =
+      CalculateCompressibleItemPayment(client, maccaCost, inserts, cost);
+
+  // Gather every item to remove by item type first so each type is removed
+  // in one go (a keep item that is also a material is paid for both)
+  std::unordered_map<uint32_t, uint64_t> removals;
+
+  uint64_t keepLeft = (uint64_t)raise;
+  for (uint32_t itemID : keepItemIDs) {
+    if (!keepLeft) break;
+
+    uint64_t owned = GetExistingItemCount(character, itemID, inventory);
+    uint64_t take = std::min(keepLeft, owned);
+    if (take) {
+      removals[itemID] += take;
+      keepLeft -= take;
+    }
+  }
+
+  success &= keepLeft == 0;
+
+  int32_t materialLeft = raise;
+  for (auto& mu : materialUses) {
+    int32_t take = std::min(materialLeft, mu.second);
+    if (take <= 0) continue;
+
+    removals[mu.first.first] += (uint64_t)take * mu.first.second;
+    materialLeft -= take;
+  }
+
+  success &= materialLeft == 0;
+
+  for (auto& pair : removals) {
+    success &=
+        CalculateItemRemoval(client, pair.first, pair.second, cost) == 0;
+  }
+
+  if (!success || !UpdateItems(client, false, inserts, cost)) {
+    return -1;
+  }
+
+  // Raise the ranks; the level and the growth type stay as they are
+  int8_t newRank = (int8_t)(current + raise);
+  demon->SetReunion((size_t)groupIdx, newRank);
+  CalculateDemonBaseStats(demon);
+
+  server->GetTokuseiManager()->Recalculate(
+      cState, true, std::set<int32_t>{dState->GetEntityID()});
+  RecalculateStats(dState, client, false);
+
+  auto cs = demon->GetCoreStats().Get();
+  auto dbChanges = libcomp::DatabaseChangeSet::Create(state->GetAccountUID());
+  dbChanges->Update(demon);
+  dbChanges->Update(cs);
+  server->GetWorldDatabase()->QueueChangeSet(dbChanges);
+
+  // Same notification as a normal reunion so the client shows the new ranks
+  libcomp::Packet notify;
+  notify.WritePacketCode(ChannelToClientPacketCode_t::PACKET_PARTNER_LEVEL_DOWN);
+  notify.WriteS32Little(dState->GetEntityID());
+  notify.WriteS8(cs->GetLevel());
+  notify.WriteS64Little(cs->GetXP());
+  GetEntityStatsPacketData(notify, cs, dState, 1);
+  notify.WriteU8((uint8_t)demon->GetGrowthType());
+
+  for (int8_t reunionRank : demon->GetReunion()) {
+    notify.WriteS8(reunionRank);
+  }
+
+  notify.WriteS8(CalculateMagReduction(client, demon));
+
+  server->GetZoneManager()->BroadcastPacket(client, notify);
+
+  return raise;
 }
 
 uint16_t CharacterManager::GetReunionRankTotal(
