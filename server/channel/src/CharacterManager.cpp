@@ -3816,8 +3816,18 @@ int32_t CharacterManager::ReunionBulk(
       GetTotalInInventory(character, SVR_CONST.ITEM_MACCA, compressible);
   int32_t byMacca = (int32_t)std::min<uint64_t>(macca / costPerRank, 10000);
 
-  uint32_t keepItems = 0;
+  // The same item may be listed more than once; count it once and pay it
+  // once (two removals of the same item would overwrite each other)
+  std::list<uint32_t> keepItemIDs;
   for (uint32_t itemID : SVR_CONST.REUNION_BULK_KEEP_ITEMS) {
+    if (std::find(keepItemIDs.begin(), keepItemIDs.end(), itemID) ==
+        keepItemIDs.end()) {
+      keepItemIDs.push_back(itemID);
+    }
+  }
+
+  uint32_t keepItems = 0;
+  for (uint32_t itemID : keepItemIDs) {
     keepItems += GetExistingItemCount(character, itemID, inventory);
   }
 
@@ -3853,10 +3863,19 @@ int32_t CharacterManager::ReunionBulk(
   bool success =
       CalculateCompressibleItemPayment(client, maccaCost, inserts, cost);
 
+  // Gather every item to remove by item type first so each type is removed
+  // in one go (a keep item that is also a material is paid for both)
+  std::unordered_map<uint32_t, uint64_t> removals;
+
   uint64_t keepLeft = (uint64_t)raise;
-  for (uint32_t itemID : SVR_CONST.REUNION_BULK_KEEP_ITEMS) {
-    if (keepLeft) {
-      keepLeft = CalculateItemRemoval(client, itemID, keepLeft, cost);
+  for (uint32_t itemID : keepItemIDs) {
+    if (!keepLeft) break;
+
+    uint64_t owned = GetExistingItemCount(character, itemID, inventory);
+    uint64_t take = std::min(keepLeft, owned);
+    if (take) {
+      removals[itemID] += take;
+      keepLeft -= take;
     }
   }
 
@@ -3867,12 +3886,16 @@ int32_t CharacterManager::ReunionBulk(
     int32_t take = std::min(materialLeft, mu.second);
     if (take <= 0) continue;
 
-    uint64_t amount = (uint64_t)take * mu.first.second;
-    success &= CalculateItemRemoval(client, mu.first.first, amount, cost) == 0;
+    removals[mu.first.first] += (uint64_t)take * mu.first.second;
     materialLeft -= take;
   }
 
   success &= materialLeft == 0;
+
+  for (auto& pair : removals) {
+    success &=
+        CalculateItemRemoval(client, pair.first, pair.second, cost) == 0;
+  }
 
   if (!success || !UpdateItems(client, false, inserts, cost)) {
     return -1;
