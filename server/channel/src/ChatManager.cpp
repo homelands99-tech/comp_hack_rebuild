@@ -466,7 +466,10 @@ bool ChatManager::HandleGMand(
     }
 
     LogChatManagerInfo([&]() {
-      return libcomp::String("[GM] %1: %2\n").Arg(sentFrom).Arg(message);
+      return libcomp::String("%1 %2: %3\n")
+          .Arg(state->GetUserLevel() == 0 ? "[Player]" : "[GM]")
+          .Arg(sentFrom)
+          .Arg(message);
     });
 
     libcomp::String command(match[1]);

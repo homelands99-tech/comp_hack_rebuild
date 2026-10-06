@@ -196,6 +196,12 @@ bool Parsers::DemonForce::Parse(
       }
     }
 
+    if (toStack) {
+      // The effect placed by this item counts as existing too (the original
+      // code collected the IDs after placing it)
+      existingIDs.insert(dfData->GetExtraID());
+    }
+
     // Apply the item once per use. Stop early once nothing would be raised
     // anymore or when a new stack effect becomes pending (it must be placed
     // before more items can be used).
