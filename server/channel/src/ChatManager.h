@@ -363,6 +363,17 @@ class ChatManager {
       const std::list<libcomp::String>& args);
 
   /**
+   * GM command to list the gacha shops or enable/disable one until the
+   * server restarts.
+   * @param client Pointer to the client that sent the command
+   * @param args List of arguments for the command
+   * @return true if the command was handled properly, else false
+   */
+  bool GMCommand_Gacha(
+      const std::shared_ptr<channel::ChannelClientConnection>& client,
+      const std::list<libcomp::String>& args);
+
+  /**
    * GM command to move one player to another player.
    * @param client Pointer to the client that sent the command
    * @param args List of arguments for the command

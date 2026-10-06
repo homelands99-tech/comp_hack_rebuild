@@ -104,6 +104,7 @@ SET(${PROJECT_NAME}_HDRS
     src/EventManager.h
     src/FusionManager.h
     src/FusionTables.h
+    src/Gacha.h
     src/ManagerClientPacket.h
     src/ManagerConnection.h
     src/ManagerSystem.h

@@ -36,7 +36,9 @@
 #include <ServerShop.h>
 
 // channel Includes
+#include "ChannelClientConnection.h"
 #include "ChannelServer.h"
+#include "Gacha.h"
 
 using namespace channel;
 
@@ -54,7 +56,19 @@ bool Parsers::CompShopList::Parse(
       std::dynamic_pointer_cast<ChannelServer>(pPacketManager->GetServer());
   auto serverDataManager = server->GetServerDataManager();
 
-  std::list<uint32_t> compShopIDs = serverDataManager->GetCompShopIDs();
+  auto client = std::dynamic_pointer_cast<ChannelClientConnection>(connection);
+
+  // Gacha shops are only listed while they are enabled and their draw tab
+  // conditions pass
+  std::list<uint32_t> compShopIDs;
+  for (uint32_t compShopID : serverDataManager->GetCompShopIDs()) {
+    auto shop = serverDataManager->GetShopData(compShopID);
+    if (gacha::IsGacha(shop) && !gacha::IsAvailable(server, client, shop)) {
+      continue;
+    }
+
+    compShopIDs.push_back(compShopID);
+  }
 
   libcomp::Packet reply;
   reply.WritePacketCode(ChannelToClientPacketCode_t::PACKET_COMP_SHOP_LIST);
@@ -73,7 +87,9 @@ bool Parsers::CompShopList::Parse(
       reply.WriteS8(idx++);
       reply.WriteS32Little(0);  // New item flag
       reply.WriteS8(1);         // Enabled
-      reply.WriteS8(0);         // Unknown
+      // Category kind: the client opens the gacha window instead of the
+      // normal shop for non-zero values (needs a client that supports it)
+      reply.WriteS8(gacha::IsGacha(shop) ? 1 : 0);
       reply.WriteU32Little(compShopID);
 
       // Notify if more exist

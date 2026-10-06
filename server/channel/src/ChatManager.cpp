@@ -68,6 +68,7 @@
 #include <PostItem.h>
 #include <PvPData.h>
 #include <ReportedPlayer.h>
+#include <ServerShop.h>
 #include <ServerZone.h>
 #include <ServerZoneInstance.h>
 #include <Team.h>
@@ -80,6 +81,7 @@
 #include "AccountManager.h"
 #include "ChannelServer.h"
 #include "ChannelSyncManager.h"
+#include "Gacha.h"
 #include "CharacterManager.h"
 #include "ClientState.h"
 #include "EventManager.h"
@@ -116,6 +118,7 @@ ChatManager::ChatManager(const std::weak_ptr<ChannelServer>& server)
   mGMands["familiarity"] = &ChatManager::GMCommand_Familiarity;
   mGMands["flag"] = &ChatManager::GMCommand_Flag;
   mGMands["fgauge"] = &ChatManager::GMCommand_FusionGauge;
+  mGMands["gacha"] = &ChatManager::GMCommand_Gacha;
   mGMands["goto"] = &ChatManager::GMCommand_Goto;
   mGMands["gp"] = &ChatManager::GMCommand_GradePoints;
   mGMands["help"] = &ChatManager::GMCommand_Help;
@@ -1853,6 +1856,71 @@ bool ChatManager::GMCommand_FusionGauge(
   return true;
 }
 
+bool ChatManager::GMCommand_Gacha(
+    const std::shared_ptr<channel::ChannelClientConnection>& client,
+    const std::list<libcomp::String>& args) {
+  // Uses the announce level as it affects every player
+  if (!HaveUserLevel(client, SVR_CONST.GM_CMD_LVL_ANNOUNCE)) {
+    return true;
+  }
+
+  auto server = mServer.lock();
+  auto serverDataManager = server->GetServerDataManager();
+
+  std::list<libcomp::String> argsCopy = args;
+  if (argsCopy.empty()) {
+    // List the gacha shops
+    bool found = false;
+    for (uint32_t shopID : serverDataManager->GetCompShopIDs()) {
+      auto shop = serverDataManager->GetShopData(shopID);
+      if (!gacha::IsGacha(shop)) continue;
+
+      found = true;
+      SendChatMessage(
+          client, ChatType_t::CHAT_SELF,
+          server->GetCustomMessage("GACHA_GM_LIST",
+                                   "Gacha %1 '%2': %3 (shown to you: %4)")
+              .Arg(shopID)
+              .Arg(shop->GetName())
+              .Arg(shop->GetDisabled() ? "off" : "on")
+              .Arg(gacha::IsAvailable(server, client, shop) ? "yes" : "no"));
+    }
+
+    if (!found) {
+      SendChatMessage(client, ChatType_t::CHAT_SELF,
+                      server->GetCustomMessage("GACHA_GM_NONE", "No gacha shops exist"));
+    }
+
+    return true;
+  }
+
+  int32_t shopID = 0;
+  libcomp::String mode;
+  if (!GetIntegerArg(shopID, argsCopy) || !GetStringArg(mode, argsCopy) ||
+      (mode != "on" && mode != "off")) {
+    return SendChatMessage(client, ChatType_t::CHAT_SELF,
+                           server->GetCustomMessage("GACHA_GM_USAGE",
+                                                    "Usage: @gacha [ID on|off]"));
+  }
+
+  auto shop = serverDataManager->GetShopData((uint32_t)shopID);
+  if (!gacha::IsGacha(shop)) {
+    return SendChatMessage(
+        client, ChatType_t::CHAT_SELF,
+        server->GetCustomMessage("GACHA_GM_NOT_GACHA", "Shop %1 is not a gacha")
+            .Arg(shopID));
+  }
+
+  shop->SetDisabled(mode == "off");
+
+  return SendChatMessage(client, ChatType_t::CHAT_SELF,
+                         server->GetCustomMessage("GACHA_GM_CHANGED",
+                                                  "Gacha %1 '%2' is now %3")
+                             .Arg(shopID)
+                             .Arg(shop->GetName())
+                             .Arg(mode));
+}
+
 bool ChatManager::GMCommand_Goto(
     const std::shared_ptr<channel::ChannelClientConnection>& client,
     const std::list<libcomp::String>& args) {
@@ -2109,6 +2177,11 @@ bool ChatManager::GMCommand_Help(
       {"forgetskill",
        {"@forgetskill ID",
         "Removes the skill with the specified ID from the player."}},
+      {"gacha",
+       {"@gacha [ID on|off]",
+        "Lists the gacha shops and whether they are enabled, or",
+        "enables/disables the gacha with the given shop ID. The",
+        "change is kept until the server restarts."}},
       {"goto",
        {"@goto [SELF] NAME",
         "If SELF is set to 'self' the player is moved to the",
