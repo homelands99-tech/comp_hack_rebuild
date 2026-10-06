@@ -3285,7 +3285,7 @@ bool ChatManager::GMCommand_SubDemon(
     SendChatMessage(client, ChatType_t::CHAT_SELF,
                     "使い方: @sub 番号（2 体目を出す） / @sub off / @sub list");
     auto active = state->GetDemonState()->GetEntity();
-    auto sub = state->GetSubDemon().Get();
+    int64_t subID = state->GetSubDemonEntityID() ? state->GetSubDemonID() : 0;
     for (size_t i = 0; i < comp->DemonsCount(); i++) {
       auto d = comp->GetDemons(i).Get();
       if (!d) {
@@ -3300,7 +3300,10 @@ bool ChatManager::GMCommand_SubDemon(
               .Arg((uint32_t)(i + 1))
               .Arg(name)
               .Arg((int32_t)d->GetCoreStats()->GetLevel())
-              .Arg(d == active ? "（召喚中）" : (d == sub ? "（2 体目）" : "")));
+              .Arg(d == active ? "（召喚中）"
+                         : (subID && state->GetObjectID(d->GetUUID()) == subID
+                                ? "（2 体目）"
+                                : "")));
     }
 
     return true;

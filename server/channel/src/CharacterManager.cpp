@@ -1445,7 +1445,7 @@ bool CharacterManager::SummonSubDemon(
   }
 
   state->SetSubDemonEntityID(eState->GetEntityID());
-  state->SetSubDemon(demon);
+  state->SetSubDemonID(state->GetObjectID(demon->GetUUID()));
 
   return true;
 }
@@ -1455,7 +1455,7 @@ bool CharacterManager::DismissSubDemon(
   auto state = client->GetClientState();
   int32_t entityID = state->GetSubDemonEntityID();
   state->SetSubDemonEntityID(0);
-  state->SetSubDemon(NULLUUID);
+  state->SetSubDemonID(0);
   if (!entityID) {
     return false;
   }
@@ -1487,7 +1487,7 @@ void CharacterManager::SummonDemon(
     return;
   }
 
-  if (state->GetSubDemon().Get() == demon) {
+  if (state->GetSubDemonEntityID() && state->GetSubDemonID() == demonID) {
     DismissSubDemon(client);
   }
 
