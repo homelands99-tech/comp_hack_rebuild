@@ -1358,8 +1358,16 @@ bool AIManager::UpdateEnemyState(
     bool isNight) {
   auto aiState = eState->GetAIState();
 
-  if (aiState->GetCompanion() && UpdateCompanionSkill(eState, now)) {
-    return false;
+  if (aiState->GetCompanion()) {
+    if (UpdateCompanionSkill(eState, now)) {
+      return false;
+    }
+
+    // Helping the owner comes before following and fighting
+    if (!eState->GetActivatedAbility() && !aiState->GetCurrentCommand() &&
+        eState->CanAct() && PrepareCompanionSkill(eState, now)) {
+      return false;
+    }
   }
 
   // Check if we need to pursue the follow target
@@ -2400,7 +2408,9 @@ bool AIManager::UpdateCompanionSkill(
   auto skillManager = mServer.lock()->GetSkillManager();
   auto zone = eState->GetZone();
   auto owner = zone ? zone->GetActiveEntity(ownerID) : nullptr;
-  if (!owner || !owner->IsAlive() ||
+  bool reviveSkill = activated->GetSkillData()->GetTarget()->GetType() ==
+                     objects::MiTargetData::Type_t::DEAD_ALLY;
+  if (!owner || owner->IsAlive() == reviveSkill ||
       now > activated->GetActivationTime() + COMPANION_SKILL_TIMEOUT) {
     // Owner gone or it took too long, drop the skill (checked first so a
     // skill stuck in any state cannot hold the companion forever)
@@ -2464,7 +2474,7 @@ bool AIManager::PrepareCompanionSkill(
   auto zone = eState->GetZone();
   auto owner = zone ? zone->GetActiveEntity(aiState->GetFollowEntityID())
                     : nullptr;
-  if (!owner || !owner->IsAlive() || !owner->Ready()) {
+  if (!owner || !owner->Ready()) {
     return false;
   }
 
@@ -2496,6 +2506,15 @@ bool AIManager::PrepareCompanionSkill(
       }
 
       if (type == AI_SKILL_TYPE_SUPPORT) {
+        // Only skills that can be aimed at the owner (not cures or other
+        // skills on the companion itself)
+        auto targetType = skillData->GetTarget()->GetType();
+        if (targetType != objects::MiTargetData::Type_t::ALLY &&
+            targetType != objects::MiTargetData::Type_t::ALLY_PLAYER &&
+            targetType != objects::MiTargetData::Type_t::PARTY) {
+          continue;
+        }
+
         // Skip support skills whose effects the owner already has
         bool needed = false;
         for (auto addStatus : skillData->GetDamage()->GetAddStatuses()) {
@@ -2523,6 +2542,7 @@ bool AIManager::PrepareCompanionSkill(
       case objects::MiTargetData::Type_t::ALLY:
       case objects::MiTargetData::Type_t::ALLY_PLAYER:
       case objects::MiTargetData::Type_t::PARTY:
+      case objects::MiTargetData::Type_t::DEAD_ALLY:
         targetID = owner->GetEntityID();
         break;
       default:
@@ -2562,6 +2582,41 @@ bool AIManager::PrepareCompanionSkill(
         std::make_shared<AIUseSkillCommand>(skillData, targetID));
   };
 
+  if (!owner->IsAlive()) {
+    // Revive the owner with any revive skill (aimed at a dead ally)
+    if (now < aiState->GetCompanionHealTime()) {
+      return false;
+    }
+
+    aiState->SetCompanionHealTime(now + COMPANION_HEAL_INTERVAL);
+
+    std::list<std::shared_ptr<objects::MiSkillData>> revives;
+    for (auto& pair : skillMap) {
+      for (auto& weight : pair.second) {
+        auto skillData = weight.first;
+        if (skillData->GetTarget()->GetType() ==
+                objects::MiTargetData::Type_t::DEAD_ALLY &&
+            !eState->SkillCooldownsKeyExists(
+                skillData->GetBasic()->GetCooldownID()) &&
+            !skillManager->SkillRestricted(eState, skillData)) {
+          revives.push_back(skillData);
+        }
+      }
+    }
+
+    LogAIManagerWarning([&]() {
+      return libcomp::String("[sub] owner is dead, revive skills usable: %1\n")
+          .Arg((uint32_t)revives.size());
+    });
+
+    if (revives.size() == 0) {
+      return false;
+    }
+
+    queue(libcomp::Randomizer::GetEntry(revives));
+    return true;
+  }
+
   float hpRatio =
       owner->GetMaxHP() > 0
           ? (float)owner->GetCoreStats()->GetHP() / (float)owner->GetMaxHP()
@@ -2577,7 +2632,7 @@ bool AIManager::PrepareCompanionSkill(
         ids += libcomp::String(" %1").Arg(weight.first->GetCommon()->GetID());
       }
 
-      return libcomp::String("[sub] owner HP %1%%, heal skills:%2, picked %3,"
+      return libcomp::String("[sub] owner HP %1 percent, heal skills:%2, picked %3,"
                              " dist %4, canMove %5, activated %6\n")
           .Arg((int32_t)(hpRatio * 100.f))
           .Arg(ids.IsEmpty() ? libcomp::String(" none") : ids)

@@ -1534,6 +1534,10 @@ bool CharacterManager::SummonSubDemon(
     // back) and pick skills by the normal logic
     aiState->SetStrikeFirst(true);
 
+    // Think faster and wait less than the species' default AI
+    aiState->SetThinkSpeed(1000);
+    aiState->SetAggression(3.f);
+
     // Species AI scripts (typical for healers) take over the action
     // choice and would skip the companion logic, so do not use them
     aiState->ClearActionOverrides();
