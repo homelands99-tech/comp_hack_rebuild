@@ -1005,6 +1005,13 @@ libhack::ServerDataManager* ChannelServer::GetServerDataManager() const {
   return mServerDataManager;
 }
 
+libcomp::String ChannelServer::GetCustomMessage(
+    const libcomp::String& id, const libcomp::String& defaultText) const {
+  return mServerDataManager
+             ? mServerDataManager->GetCustomMessage(id, defaultText)
+             : defaultText;
+}
+
 ChannelSyncManager* ChannelServer::GetChannelSyncManager() const {
   return mSyncManager;
 }

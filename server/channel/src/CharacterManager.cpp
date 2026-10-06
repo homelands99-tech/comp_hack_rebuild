@@ -5803,12 +5803,14 @@ std::unordered_map<uint32_t, uint32_t> CharacterManager::StoreInMaterialTank(
   for (auto& pair : stored) {
     auto name = definitionManager->GetItemName(pair.first);
     if (name.IsEmpty()) {
-      name = libcomp::String("アイテム %1").Arg(pair.first);
+      name = server->GetCustomMessage("MATERIAL_TANK_ITEM", "アイテム %1")
+                 .Arg(pair.first);
     }
 
     server->GetChatManager()->SendChatMessage(
         client, ChatType_t::CHAT_SELF,
-        libcomp::String("原料タンクに %1 を %2 個収納しました。（計 %3）")
+        server->GetCustomMessage("MATERIAL_TANK_STORED",
+                                 "原料タンクに %1 を %2 個収納しました。（計 %3）")
             .Arg(name)
             .Arg(pair.second)
             .Arg(character->GetMaterials(pair.first)));
