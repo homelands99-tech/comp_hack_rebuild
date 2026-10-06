@@ -79,10 +79,10 @@
 #define FOLLOW_DISTANCE_COMPANION (300.f)
 
 // ...and walk up to this distance of the owner when catching up
-#define FOLLOW_DISTANCE_COMPANION_CLOSE (150.f)
+#define FOLLOW_DISTANCE_COMPANION_CLOSE (220.f)
 
 // ...and do not drift far from their owner during combat either
-#define FOLLOW_DISTANCE_COMPANION_COMBAT (1000.f)
+#define FOLLOW_DISTANCE_COMPANION_COMBAT (750.f)
 
 // Companions heal their owner at or below this HP ratio
 #define COMPANION_HEAL_RATIO (0.5f)
@@ -1652,10 +1652,24 @@ bool AIManager::UpdateEnemyState(
   } else {
     uint32_t waitTime = 0;
 
+    // Diagnostic (prototype): why a companion is not acting, at most every 2s
+    auto companionLog = [&](const libcomp::String& why) {
+      if (aiState->GetCompanion() && now >= aiState->GetCompanionLogTime()) {
+        aiState->SetCompanionLogTime(now + 2000000ULL);
+        LogAIManagerWarning([&]() {
+          return libcomp::String("[sub] combat: %1 (target dist %2, skills %3)\n")
+              .Arg(why)
+              .Arg((int32_t)targetDist)
+              .Arg((uint32_t)eState->CurrentSkillsCount());
+        });
+      }
+    };
+
     int16_t waitChance = (int16_t)(100.f * aiState->GetAggression());
     if (RNG(int16_t, 1, waitChance > 25 ? waitChance : 25) <= 20) {
       // 20% chance to just wait (lower for high aggression)
       waitTime = 1000;
+      companionLog("random wait");
     } else if (eState->CurrentSkillsCount() > 0) {
       // If aggro limit is enabled and the target is being knocked back
       // wait instead to stagger attacks
@@ -1664,6 +1678,8 @@ bool AIManager::UpdateEnemyState(
         uint64_t kbTime = target->GetStatusTimes(STATUS_KNOCKBACK);
         if (CombatStaggerEnabled() && kbTime) {
           waitTime = (uint32_t)((kbTime - now) / 1000 + 500);
+          companionLog(libcomp::String("target knocked back, wait %1 ms")
+                           .Arg(waitTime));
         }
       }
 
@@ -1671,6 +1687,8 @@ bool AIManager::UpdateEnemyState(
         // All normal movement is based off skill usage, determine
         // which skill to use next
         if (!PrepareSkillUsage(eState)) {
+          companionLog("no usable attack skill, drop target");
+
           // No skill can be used, drop aggro
           UpdateAggro(eState, -1);
 
@@ -1682,10 +1700,12 @@ bool AIManager::UpdateEnemyState(
         } else if (!aiState->GetCurrentCommand()) {
           // Nothing was queued, wait instead
           waitTime = (uint32_t)aiState->GetThinkSpeed();
+          companionLog("nothing queued, wait");
         }
       }
     } else {
       // No skills exist, drop aggro
+      companionLog("has no skills");
       UpdateAggro(eState, -1);
     }
 
