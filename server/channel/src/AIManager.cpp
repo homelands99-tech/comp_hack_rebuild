@@ -48,6 +48,7 @@
 #include <MiCategoryData.h>
 #include <MiConditionData.h>
 #include <MiCostTbl.h>
+#include <MiAddStatusTbl.h>
 #include <MiDamageData.h>
 #include <MiDevilData.h>
 #include <MiEffectiveRangeData.h>
@@ -85,6 +86,9 @@
 
 // Companions try to heal their owner at most this often (us)
 #define COMPANION_HEAL_INTERVAL (3000000ULL)
+
+// Companions give up a skill aimed at their owner after this long (us)
+#define COMPANION_SKILL_TIMEOUT (6000000ULL)
 
 using namespace channel;
 
@@ -1354,6 +1358,10 @@ bool AIManager::UpdateEnemyState(
     bool isNight) {
   auto aiState = eState->GetAIState();
 
+  if (aiState->GetCompanion() && UpdateCompanionSkill(eState, now)) {
+    return false;
+  }
+
   // Check if we need to pursue the follow target
   if (aiState->HasFollowTarget() && Follow(eState, now)) {
     return false;
@@ -2378,6 +2386,51 @@ bool AIManager::CanRetrySkill(
   return false;
 }
 
+bool AIManager::UpdateCompanionSkill(
+    const std::shared_ptr<ActiveEntityState>& eState, uint64_t now) {
+  auto aiState = eState->GetAIState();
+  auto activated = eState->GetActivatedAbility();
+  int32_t ownerID = aiState->GetFollowEntityID();
+  if (!activated || ownerID <= 0 ||
+      (int32_t)activated->GetTargetObjectID() != ownerID) {
+    // Not a skill aimed at the owner, normal logic handles it
+    return false;
+  }
+
+  if (aiState->GetCurrentCommand() ||
+      (activated->GetExecutionRequestTime() &&
+       activated->GetErrorCode() == -1) ||
+      eState->GetStatusTimes(STATUS_CHARGING)) {
+    // Busy, executing or still charging
+    return true;
+  }
+
+  auto skillManager = mServer.lock()->GetSkillManager();
+  auto zone = eState->GetZone();
+  auto owner = zone ? zone->GetActiveEntity(ownerID) : nullptr;
+  if (!owner || !owner->IsAlive() ||
+      now > activated->GetActivationTime() + COMPANION_SKILL_TIMEOUT) {
+    // Owner gone or it took too long, drop the skill
+    skillManager->CancelSkill(eState, activated->GetActivationID());
+    return true;
+  }
+
+  // Same range as the server check (with a small buffer)
+  owner->RefreshCurrentPosition(now);
+  auto skillData = activated->GetSkillData();
+  float range = (float)(SKILL_DISTANCE_OFFSET + (owner->GetHitboxSize() * 10) +
+                        (eState->GetHitboxSize() * 10) +
+                        (skillData->GetTarget()->GetRange() * 10)) -
+                20.f;
+  if (eState->GetDistance(owner) > range) {
+    Chase(eState, ownerID, range);
+  } else {
+    aiState->QueueCommand(std::make_shared<AIUseSkillCommand>(activated));
+  }
+
+  return true;
+}
+
 bool AIManager::PrepareCompanionSkill(
     const std::shared_ptr<ActiveEntityState>& eState, uint64_t now) {
   auto aiState = eState->GetAIState();
@@ -2397,11 +2450,28 @@ bool AIManager::PrepareCompanionSkill(
     std::list<std::shared_ptr<objects::MiSkillData>> usable;
     for (auto& weight : skillMap[type]) {
       auto skillData = weight.first;
-      if (!eState->SkillCooldownsKeyExists(
-              skillData->GetBasic()->GetCooldownID()) &&
-          !skillManager->SkillRestricted(eState, skillData)) {
-        usable.push_back(skillData);
+      if (eState->SkillCooldownsKeyExists(
+              skillData->GetBasic()->GetCooldownID()) ||
+          skillManager->SkillRestricted(eState, skillData)) {
+        continue;
       }
+
+      if (type == AI_SKILL_TYPE_SUPPORT) {
+        // Skip support skills whose effects the owner already has
+        bool needed = false;
+        for (auto addStatus : skillData->GetDamage()->GetAddStatuses()) {
+          if (!owner->StatusEffectActive(addStatus->GetStatusID())) {
+            needed = true;
+            break;
+          }
+        }
+
+        if (!needed) {
+          continue;
+        }
+      }
+
+      usable.push_back(skillData);
     }
 
     return usable.size() > 0 ? libcomp::Randomizer::GetEntry(usable)
@@ -2425,6 +2495,7 @@ bool AIManager::PrepareCompanionSkill(
       owner->RefreshCurrentPosition(now);
       float range = (float)(SKILL_DISTANCE_OFFSET +
                             (owner->GetHitboxSize() * 10) +
+                            (eState->GetHitboxSize() * 10) +
                             (skillData->GetTarget()->GetRange() * 10)) -
                     20.f;
       if (eState->GetDistance(owner) > range) {

@@ -327,6 +327,16 @@ class AIManager {
                              uint64_t now);
 
   /**
+   * For a companion: execute a charged skill aimed at the owner once in
+   * range (moving closer first), or drop it if it takes too long.
+   * @param eState Pointer to the companion entity state
+   * @param now Current server time
+   * @return true if the companion is busy with such a skill
+   */
+  bool UpdateCompanionSkill(const std::shared_ptr<ActiveEntityState>& eState,
+                            uint64_t now);
+
+  /**
    * Set the entity's destination position based on the supplied
    * values and uses the current position values to set the origin.
    * Communicating that the move has taken place must be done elsewhere.
