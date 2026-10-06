@@ -83,6 +83,9 @@
 // Companions use a support skill on their owner at most this often (us)
 #define COMPANION_SUPPORT_INTERVAL (30000000ULL)
 
+// Companions try to heal their owner at most this often (us)
+#define COMPANION_HEAL_INTERVAL (3000000ULL)
+
 using namespace channel;
 
 std::unordered_map<std::string, std::shared_ptr<libhack::ScriptEngine>>
@@ -1557,8 +1560,12 @@ bool AIManager::UpdateEnemyState(
 
     // Skill charged, cancel, execute or move within range
     int64_t activationTarget = activated->GetTargetObjectID();
+    bool companionOnOwner =
+        aiState->GetCompanion() &&
+        (int32_t)activationTarget == aiState->GetFollowEntityID();
     if (activationTarget > 0 && targetEntityID != (int32_t)activationTarget &&
-        eState->GetEntityID() != (int32_t)activationTarget) {
+        eState->GetEntityID() != (int32_t)activationTarget &&
+        !companionOnOwner) {
       // Target changed
       skillManager->TargetSkill(eState, targetEntityID);
       return false;
@@ -2413,6 +2420,19 @@ bool AIManager::PrepareCompanionSkill(
         break;
     }
 
+    if (targetID == owner->GetEntityID()) {
+      // Get within the skill's range of the owner first
+      owner->RefreshCurrentPosition(now);
+      float range = (float)(SKILL_DISTANCE_OFFSET +
+                            (owner->GetHitboxSize() * 10) +
+                            (skillData->GetTarget()->GetRange() * 10)) -
+                    20.f;
+      if (eState->GetDistance(owner) > range) {
+        Chase(eState, owner->GetEntityID(), range);
+        return;
+      }
+    }
+
     aiState->QueueCommand(
         std::make_shared<AIUseSkillCommand>(skillData, targetID));
   };
@@ -2421,9 +2441,12 @@ bool AIManager::PrepareCompanionSkill(
       owner->GetMaxHP() > 0
           ? (float)owner->GetCoreStats()->GetHP() / (float)owner->GetMaxHP()
           : 1.f;
-  if (hpRatio <= COMPANION_HEAL_RATIO) {
+  if (hpRatio <= COMPANION_HEAL_RATIO &&
+      now >= aiState->GetCompanionHealTime()) {
     auto skillData = pick(AI_SKILL_TYPE_HEAL);
     if (skillData) {
+      // Do not keep retrying right away if the heal does not work
+      aiState->SetCompanionHealTime(now + COMPANION_HEAL_INTERVAL);
       queue(skillData);
       return true;
     }

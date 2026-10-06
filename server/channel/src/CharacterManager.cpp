@@ -1366,6 +1366,51 @@ void CharacterManager::SendAutoRecovery(
   }
 }
 
+/**
+ * Refresh one demon's slot in the client's COMP window.
+ * @param manager Character manager
+ * @param client Pointer to the client connection
+ * @param demon Demon in the COMP
+ */
+static void SendCompSlot(
+    CharacterManager* manager,
+    const std::shared_ptr<channel::ChannelClientConnection>& client,
+    const std::shared_ptr<objects::Demon>& demon) {
+  auto character = client->GetClientState()->GetCharacterState()->GetEntity();
+  auto comp = character ? character->GetCOMP().Get() : nullptr;
+  if (!comp || !demon) {
+    return;
+  }
+
+  for (size_t i = 0; i < comp->DemonsCount(); i++) {
+    if (comp->GetDemons(i).Get() == demon) {
+      manager->SendDemonBoxData(client, 0, {(int8_t)i});
+      break;
+    }
+  }
+}
+
+void CharacterManager::MarkSubDemonDead(
+    const std::shared_ptr<channel::ChannelClientConnection>& client,
+    int32_t entityID) {
+  auto state = client->GetClientState();
+  if (!entityID || state->GetSubDemonEntityID() != entityID) {
+    return;
+  }
+
+  auto demon = std::dynamic_pointer_cast<objects::Demon>(
+      libcomp::PersistentObject::GetObjectByUUID(
+          state->GetObjectUUID(state->GetSubDemonID())));
+  auto ds = demon ? demon->GetCoreStats().Get() : nullptr;
+  if (!ds) {
+    return;
+  }
+
+  ds->SetHP(0);
+  mServer.lock()->GetWorldDatabase()->QueueUpdate(ds, state->GetAccountUID());
+  SendCompSlot(this, client, demon);
+}
+
 bool CharacterManager::SummonSubDemon(
     const std::shared_ptr<channel::ChannelClientConnection>& client,
     size_t slot, libcomp::String& error) {
@@ -1526,6 +1571,7 @@ bool CharacterManager::DismissSubDemon(
     ds->SetHP(std::min(hp, (int32_t)ds->GetMaxHP()));
     ds->SetMP(std::min(mp, (int32_t)ds->GetMaxMP()));
     mServer.lock()->GetWorldDatabase()->QueueUpdate(ds, state->GetAccountUID());
+    SendCompSlot(this, client, demon);
   }
 
   if (ally) {

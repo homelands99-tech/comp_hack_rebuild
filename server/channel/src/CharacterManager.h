@@ -314,6 +314,16 @@ class CharacterManager {
       int32_t onlyEntityID = 0);
 
   /**
+   * Called when the client's second demon dies: the COMP demon gets HP 0
+   * right away (the ally entity may be removed before it is dismissed).
+   * @param client Pointer to the client connection
+   * @param entityID Entity ID of the second demon that died
+   */
+  void MarkSubDemonDead(
+      const std::shared_ptr<channel::ChannelClientConnection>& client,
+      int32_t entityID);
+
+  /**
    * Give experience to the COMP demon used as the client's second demon
    * (prototype, only when ClientState SubDemonXP is on).
    * @param client Pointer to the client connection

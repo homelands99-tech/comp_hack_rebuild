@@ -6443,6 +6443,8 @@ void SkillManager::HandleKills(
           auto ownerClient = managerConnection->GetEntityClient(
               entity->GetAIState()->GetFollowEntityID());
           if (ownerClient) {
+            characterManager->MarkSubDemonDead(ownerClient,
+                                               entity->GetEntityID());
             server->ScheduleWork(
                 (channel::ServerTime)(ChannelServer::GetServerTime() +
                                       5000000ULL),
