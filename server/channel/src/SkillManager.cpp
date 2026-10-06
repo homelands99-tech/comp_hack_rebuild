@@ -376,6 +376,9 @@ SkillManager::SkillManager(const std::weak_ptr<ChannelServer>& server)
       &SkillManager::Traesto;
   mSkillFunctions[SVR_CONST.SKILL_XP_PARTNER] = &SkillManager::XPUp;
   mSkillFunctions[SVR_CONST.SKILL_XP_SELF] = &SkillManager::XPUp;
+  if (SVR_CONST.SKILL_SUB_DEMON) {
+    mSkillFunctions[SVR_CONST.SKILL_SUB_DEMON] = &SkillManager::SubDemon;
+  }
 
   // Map skills that will send a follow up packet after processing
   mSkillFunctions[SVR_CONST.SKILL_CLAN_FORM] = &SkillManager::SpecialSkill;
@@ -12094,6 +12097,32 @@ bool SkillManager::Traesto(
     SendFailure(activated, client, (uint8_t)SkillErrorCodes_t::GENERIC_USE);
     return false;
   }
+}
+
+bool SkillManager::SubDemon(
+    const std::shared_ptr<objects::ActivatedAbility>& activated,
+    const std::shared_ptr<SkillExecutionContext>& ctx,
+    const std::shared_ptr<ChannelClientConnection>& client) {
+  if (!client) {
+    SendFailure(activated, client, (uint8_t)SkillErrorCodes_t::GENERIC);
+    return false;
+  }
+
+  auto server = mServer.lock();
+  libcomp::String message;
+  bool done = server->GetCharacterManager()->ToggleSubDemon(client, message);
+  if (!done) {
+    SendFailure(activated, client, (uint8_t)SkillErrorCodes_t::GENERIC);
+  } else {
+    SpecialSkill(activated, ctx, client);
+  }
+
+  if (!message.IsEmpty()) {
+    server->GetChatManager()->SendChatMessage(client, ChatType_t::CHAT_SELF,
+                                              message);
+  }
+
+  return done;
 }
 
 bool SkillManager::XPUp(

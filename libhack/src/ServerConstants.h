@@ -469,6 +469,15 @@ class ServerConstants {
     /// there automatically (1 = on, 0 = off). Optional, defaults to off.
     uint8_t AUTO_MATERIAL_TANK;
 
+    /// Second demon: players can register a COMP demon (event script
+    /// action_subdemon) and bring it out as an AI ally with the
+    /// SKILL_SUB_DEMON skill (1 = on, 0 = off). Optional, defaults to off.
+    uint8_t SUB_DEMON_ENABLED;
+
+    /// Skill function ID that brings out / returns the registered second
+    /// demon. 0 = no skill. Optional.
+    uint16_t SKILL_SUB_DEMON;
+
     /// Default zone to move players when no other zone is found
     uint32_t ZONE_DEFAULT;
 

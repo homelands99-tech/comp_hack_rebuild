@@ -314,6 +314,19 @@ bool ServerConstants::Initialize(const String& filePath) {
                            sConstants.AUTO_MATERIAL_TANK);
   }
 
+  // Optional: second demon (registered COMP demon as an AI ally)
+  sConstants.SUB_DEMON_ENABLED = 0;
+  if (constants.find("SUB_DEMON_ENABLED") != constants.end()) {
+    success &= LoadInteger(constants["SUB_DEMON_ENABLED"],
+                           sConstants.SUB_DEMON_ENABLED);
+  }
+
+  sConstants.SKILL_SUB_DEMON = 0;
+  if (constants.find("SKILL_SUB_DEMON") != constants.end()) {
+    success &=
+        LoadInteger(constants["SKILL_SUB_DEMON"], sConstants.SKILL_SUB_DEMON);
+  }
+
   // Load other constants
   success &= LoadInteger(constants["DIGITALIZE_COOLDOWN"],
                          sConstants.DIGITALIZE_COOLDOWN);

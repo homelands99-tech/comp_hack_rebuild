@@ -305,6 +305,37 @@ class CharacterManager {
       size_t slot, libcomp::String& error);
 
   /**
+   * Register the character's summoned demon as its second demon (or clear
+   * the registration). Used by the event script action_subdemon.
+   * @param cState Character state
+   * @param mode 0 = register the summoned demon, 1 = clear, 2 = only
+   *  report the state
+   * @return 1 registered (or cleared), 0 nothing registered (mode 2 / no
+   *  change), -1 the feature is off, -2 no demon is summoned, -3 error
+   */
+  int8_t RegisterSubDemon(const std::shared_ptr<CharacterState>& cState,
+                          int8_t mode);
+
+  /**
+   * Bring out the registered second demon, or return it if it is out.
+   * Used by the SKILL_SUB_DEMON skill.
+   * @param client Pointer to the client connection
+   * @param message Output message for the player
+   * @return true if something was done
+   */
+  bool ToggleSubDemon(
+      const std::shared_ptr<channel::ChannelClientConnection>& client,
+      libcomp::String& message);
+
+  /**
+   * Return the second demon if its demon is no longer in the COMP (moved to
+   * a depot, deleted).
+   * @param client Pointer to the client connection
+   */
+  void CheckSubDemonInCOMP(
+      const std::shared_ptr<channel::ChannelClientConnection>& client);
+
+  /**
    * Remove the client's second demon (see SummonSubDemon) if it exists.
    * @param client Pointer to the client connection
    * @return true if one was removed

@@ -146,7 +146,8 @@ BaseScriptEngine& BaseScriptEngine::Using<CharacterManager>() {
                                          uint8_t, int8_t)>(
             "DoMitamaReunion", &CharacterManager::DoMitamaReunion)
         .Func("GetMitamaReunionDetails",
-              &CharacterManager::GetMitamaReunionDetails);
+              &CharacterManager::GetMitamaReunionDetails)
+        .Func("RegisterSubDemon", &CharacterManager::RegisterSubDemon);
 
     Bind<CharacterManager>("CharacterManager", binding);
   }
@@ -1413,6 +1414,118 @@ void CharacterManager::MarkSubDemonDead(
 
 // The second demon moves this much faster than normal
 #define SUB_DEMON_MOVE_RATE (1.5)
+
+int8_t CharacterManager::RegisterSubDemon(
+    const std::shared_ptr<CharacterState>& cState, int8_t mode) {
+  auto character = cState ? cState->GetEntity() : nullptr;
+  if (!character) {
+    return -3;
+  }
+
+  if (!SVR_CONST.SUB_DEMON_ENABLED) {
+    return -1;
+  }
+
+  auto server = mServer.lock();
+  auto client = server->GetManagerConnection()->GetEntityClient(
+      cState->GetEntityID(), false);
+  auto state = client ? client->GetClientState() : nullptr;
+
+  if (mode == 2) {
+    return character->GetSubDemon().Get() ? 1 : 0;
+  }
+
+  std::shared_ptr<objects::Demon> demon;
+  if (mode == 0) {
+    demon = state ? state->GetDemonState()->GetEntity() : nullptr;
+    if (!demon) {
+      return -2;
+    }
+  }
+
+  // A different demon replaces the one that is out
+  if (client) {
+    DismissSubDemon(client);
+  }
+
+  if (mode == 1 && !character->GetSubDemon().Get()) {
+    return 0;
+  }
+
+  if (demon) {
+    character->SetSubDemon(demon);
+  } else {
+    character->SetSubDemon(NULLUUID);
+  }
+
+  server->GetWorldDatabase()->QueueUpdate(
+      character, state ? state->GetAccountUID() : character->GetAccount());
+
+  return 1;
+}
+
+bool CharacterManager::ToggleSubDemon(
+    const std::shared_ptr<channel::ChannelClientConnection>& client,
+    libcomp::String& message) {
+  if (!SVR_CONST.SUB_DEMON_ENABLED) {
+    message = "2 体目は使えません。";
+    return false;
+  }
+
+  auto state = client->GetClientState();
+  if (state->GetSubDemonEntityID()) {
+    DismissSubDemon(client);
+    message = "2 体目を戻しました。";
+    return true;
+  }
+
+  auto character = state->GetCharacterState()->GetEntity();
+  auto demon = character ? character->GetSubDemon().Get() : nullptr;
+  if (!demon) {
+    message = "2 体目に登録した仲魔がいません。";
+    return false;
+  }
+
+  auto comp = character->GetCOMP().Get();
+  for (size_t i = 0; comp && i < comp->DemonsCount(); i++) {
+    if (comp->GetDemons(i).Get() == demon) {
+      if (!SummonSubDemon(client, i, message)) {
+        return false;
+      }
+
+      message = "2 体目を呼び出しました。";
+      return true;
+    }
+  }
+
+  message = "2 体目に登録した仲魔が COMP にいません。";
+  return false;
+}
+
+void CharacterManager::CheckSubDemonInCOMP(
+    const std::shared_ptr<channel::ChannelClientConnection>& client) {
+  auto state = client->GetClientState();
+  if (!state->GetSubDemonEntityID()) {
+    return;
+  }
+
+  auto demon = std::dynamic_pointer_cast<objects::Demon>(
+      libcomp::PersistentObject::GetObjectByUUID(
+          state->GetObjectUUID(state->GetSubDemonID())));
+  auto character = state->GetCharacterState()->GetEntity();
+  auto comp = character ? character->GetCOMP().Get() : nullptr;
+  bool inComp = false;
+  for (size_t i = 0; demon && comp && i < comp->DemonsCount(); i++) {
+    if (comp->GetDemons(i).Get() == demon) {
+      inComp = true;
+      break;
+    }
+  }
+
+  if (!inComp) {
+    DismissSubDemon(client);
+  }
+}
 
 bool CharacterManager::SummonSubDemon(
     const std::shared_ptr<channel::ChannelClientConnection>& client,
@@ -8226,6 +8339,30 @@ void CharacterManager::DeleteDemon(
   if (box && box->GetDemons((size_t)demon->GetBoxSlot()).Get() == demon) {
     box->SetDemons((size_t)demon->GetBoxSlot(), NULLUUID);
     changes->Update(box);
+
+    // A second demon that is gone: put it away and clear the registration
+    auto owner = std::dynamic_pointer_cast<objects::Character>(
+        libcomp::PersistentObject::GetObjectByUUID(box->GetCharacter()));
+    if (owner && owner->GetSubDemon().GetUUID() == demon->GetUUID()) {
+      auto ownerAccount = std::dynamic_pointer_cast<objects::Account>(
+          libcomp::PersistentObject::GetObjectByUUID(box->GetAccount()));
+      auto ownerClient =
+          ownerAccount
+              ? mServer.lock()->GetManagerConnection()->GetClientConnection(
+                    ownerAccount->GetUsername())
+              : nullptr;
+      if (ownerClient) {
+        auto ownerState = ownerClient->GetClientState();
+        if (ownerState->GetSubDemonEntityID() &&
+            ownerState->GetSubDemonID() ==
+                ownerState->GetObjectID(demon->GetUUID())) {
+          DismissSubDemon(ownerClient);
+        }
+      }
+
+      owner->SetSubDemon(NULLUUID);
+      changes->Update(owner);
+    }
 
     if (demon->GetHasQuest()) {
       // End the demon quest if it belongs to the demon

@@ -3316,6 +3316,24 @@ bool ChatManager::GMCommand_SubDemon(
                                : "2 体目は出ていません。");
   }
 
+  if (arg == "reg" || arg == "unreg") {
+    // Same as the event script action_subdemon (register / clear)
+    int8_t result = characterManager->RegisterSubDemon(
+        state->GetCharacterState(), arg == "reg" ? 0 : 1);
+    return SendChatMessage(
+        client, ChatType_t::CHAT_SELF,
+        libcomp::String("登録の結果: %1（1 成功、0 変化なし、-1 機能が OFF、"
+                        "-2 召喚中の仲魔なし）")
+            .Arg((int32_t)result));
+  }
+
+  if (arg == "use") {
+    // Same as the SKILL_SUB_DEMON skill
+    libcomp::String message;
+    characterManager->ToggleSubDemon(client, message);
+    return SendChatMessage(client, ChatType_t::CHAT_SELF, message);
+  }
+
   if (arg == "xp") {
     // Prototype switch: give experience to the second demon too
     libcomp::String value = args.size() > 1 ? args.back().ToLower() : "";

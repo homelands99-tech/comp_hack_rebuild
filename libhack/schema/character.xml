@@ -25,6 +25,8 @@
         <member type="s8" name="ExpertiseExtension"/>
         <member type="DemonBox*" name="COMP" caps="true"/>
         <member type="Demon*" name="ActiveDemon"/>
+        <!-- COMP demon registered as the second demon (SUB_DEMON_ENABLED) -->
+        <member type="Demon*" name="SubDemon"/>
         <member type="u32" name="HomepointZone"/>
         <member type="u32" name="HomepointSpotID"/>
         <member type="u32" name="LogoutZone"/>
