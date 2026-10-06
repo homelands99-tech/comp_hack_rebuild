@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<objgen>
+    <!-- Text of the messages added by this fork (data/custom_messages.xml).
+         The server uses Text in place of the default written in the source;
+         DefaultText and Note are only for people / tools editing the file. -->
+    <object name="CustomMessage" persistent="false">
+        <member type="string" name="ID"/>
+        <member type="string" name="Text"/>
+        <member type="string" name="DefaultText"/>
+        <member type="string" name="Note"/>
+    </object>
+</objgen>

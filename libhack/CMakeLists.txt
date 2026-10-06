@@ -104,6 +104,7 @@ SET(${PROJECT_NAME}_SCHEMA
     schema/ailogic.xml
     schema/character.xml
     schema/clan.xml
+    schema/custom_message.xml
     schema/demon.xml
     schema/enemy.xml
     schema/event.xml
@@ -357,6 +358,8 @@ OBJGEN_XML(${PROJECT_NAME}_STRUCTS
     DemonPresent.cpp
     MinionData.h
     MinionData.cpp
+    CustomMessage.h
+    CustomMessage.cpp
     DemonQuestReward.h
     DemonQuestReward.cpp
     DropSet.h

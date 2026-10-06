@@ -78,3 +78,29 @@ COMP の仲魔をもう 1 体、AI で動く味方として連れて歩けます
 `CharacterManager::RegisterSubDemon`) and bring it out as an AI ally with the
 `SKILL_SUB_DEMON` skill. Minion types in `data/minions.xml` can be summoned
 with the `SKILL_MINION` skill. Enable with `SUB_DEMON_ENABLED` / `MINION_ENABLED`.*
+
+## 追加機能の文言（custom_messages） / Texts of the added features ##
+
+追加した機能がプレイヤーに出す文言（チャット欄のメッセージ・GM コマンドの表示）は、
+サーバーのデータ `datastore/data/custom_messages.xml` で変えられます（サーバーの再起動で反映）。
+
+```xml
+<objects>
+    <object name="CustomMessage">
+        <member name="ID">MATERIAL_TANK_STORED</member>
+        <member name="Text">原料タンクに %1 を %2 個収納しました。（計 %3）</member>
+        <member name="DefaultText">原料タンクに %1 を %2 個収納しました。（計 %3）</member>
+        <member name="Note">説明（サーバーは読まない）</member>
+    </object>
+</objects>
+```
+
+- `Text` が文言です。`%1`・`%2` などには数や名前が入ります。
+- ファイルが無い・その ID が無い・`Text` が空のときは、ソースに書いてある文言（`DefaultText` と同じ）を使います。
+- `data/custom_messages/` フォルダに複数のファイルを置くこともできます（ファイルが 1 つも無いときだけ
+  `data/custom_messages.xml` を読みます）。
+- 追加する機能の文言は、ソースでは `ChannelServer::GetCustomMessage("ID", "文言")` で出します。
+
+*English: Texts shown to players by the added features can be overridden in
+`data/custom_messages.xml` (CustomMessage ID / Text). Without an entry the
+default from the source is used.*

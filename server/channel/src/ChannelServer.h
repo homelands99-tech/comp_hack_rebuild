@@ -289,6 +289,18 @@ class ChannelServer : public libhack::Server {
   libhack::ServerDataManager* GetServerDataManager() const;
 
   /**
+   * Get the text of a message added by this fork (data/custom_messages.xml,
+   * see ServerDataManager::GetCustomMessage). Every message shown to players
+   * by an added feature goes through this so it can be changed without a
+   * rebuild.
+   * @param id Message ID
+   * @param defaultText Text used when the file does not set it
+   * @return Text to show
+   */
+  libcomp::String GetCustomMessage(const libcomp::String& id,
+                                   const libcomp::String& defaultText) const;
+
+  /**
    * Get a pointer to the data sync manager.
    * @return Pointer to the ChannelSyncManager
    */
