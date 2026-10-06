@@ -3194,7 +3194,7 @@ bool ChatManager::GMCommand_ReunionPoints(
       argsCopy.pop_front();
     } else if (mode != 0) {
       return SendChatMessage(client, ChatType_t::CHAT_SELF,
-                             "使い方: @rpoint [mitama] [[+|-]数] [キャラクター名]");
+                             mServer.lock()->GetCustomMessage("RPOINT_USAGE", "使い方: @rpoint [mitama] [[+|-]数] [キャラクター名]"));
     }
   }
 
@@ -3208,7 +3208,7 @@ bool ChatManager::GMCommand_ReunionPoints(
         !targetClient) {
       return SendChatMessage(
           client, ChatType_t::CHAT_SELF,
-          libcomp::String("キャラクター %1 が見つからないか、接続していません")
+          mServer.lock()->GetCustomMessage("RPOINT_NO_CHARACTER", "キャラクター %1 が見つからないか、接続していません")
               .Arg(name));
     }
   }
@@ -3218,18 +3218,19 @@ bool ChatManager::GMCommand_ReunionPoints(
   auto targetCharacter = targetState->GetCharacterState()->GetEntity();
   if (!awd || !targetCharacter) {
     return SendChatMessage(client, ChatType_t::CHAT_SELF,
-                           "ポイントの情報を読み込めませんでした");
+                           mServer.lock()->GetCustomMessage("RPOINT_NO_DATA", "ポイントの情報を読み込めませんでした"));
   }
 
   libcomp::String pointName =
-      mitama ? "御霊ポイント" : "リユニオン変換ポイント";
+      mitama ? mServer.lock()->GetCustomMessage("RPOINT_NAME_MITAMA", "御霊ポイント")
+             : mServer.lock()->GetCustomMessage("RPOINT_NAME_REUNION", "リユニオン変換ポイント");
   int64_t before = mitama ? (int64_t)awd->GetMitamaReunionPoints()
                           : (int64_t)awd->GetReunionPoints();
 
   if (!hasValue) {
     return SendChatMessage(
         client, ChatType_t::CHAT_SELF,
-        libcomp::String("%1: リユニオン変換ポイント %2 / 御霊ポイント %3")
+        mServer.lock()->GetCustomMessage("RPOINT_SHOW", "%1: リユニオン変換ポイント %2 / 御霊ポイント %3")
             .Arg(targetCharacter->GetName())
             .Arg(awd->GetReunionPoints())
             .Arg(awd->GetMitamaReunionPoints()));
@@ -3260,7 +3261,7 @@ bool ChatManager::GMCommand_ReunionPoints(
   reply.WriteS32Little((int32_t)awd->GetMitamaReunionPoints());
   targetClient->SendPacket(reply);
 
-  libcomp::String message = libcomp::String("%1 の%2: %3 → %4")
+  libcomp::String message = server->GetCustomMessage("RPOINT_CHANGED", "%1 の%2: %3 → %4")
                                 .Arg(targetCharacter->GetName())
                                 .Arg(pointName)
                                 .Arg(before)
@@ -3269,7 +3270,8 @@ bool ChatManager::GMCommand_ReunionPoints(
   if (targetClient != client) {
     auto character = client->GetClientState()->GetCharacterState()->GetEntity();
     SendChatMessage(targetClient, ChatType_t::CHAT_SELF,
-                    libcomp::String("%1が %2 → %3 になりました（%4）")
+                    server->GetCustomMessage("RPOINT_CHANGED_TARGET",
+                                             "%1が %2 → %3 になりました（%4）")
                         .Arg(pointName)
                         .Arg(before)
                         .Arg(after)
