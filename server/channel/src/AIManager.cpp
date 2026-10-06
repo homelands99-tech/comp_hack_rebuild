@@ -1436,9 +1436,27 @@ bool AIManager::UpdateEnemyState(
     }
   }
 
+  // Companions walk with their owner out of combat
+  bool companionWalk = aiState->GetCompanion() &&
+                       aiState->HasFollowTarget() && !COMPANION_FLAG("Stay") &&
+                       (aiState->IsWandering() || aiState->IsFollowing());
+  if (companionWalk) {
+    switch (CompanionFollow(eState, now)) {
+      case 1:
+        return true;
+      case 2:
+        return false;
+      default:
+        break;
+    }
+  } else if (aiState->GetCompanion() && eState->GetSpeedBoost()) {
+    // Fighting: normal speed again
+    eState->SetSpeedBoost(0);
+  }
+
   // Check if we need to pursue the follow target
-  if (aiState->HasFollowTarget() && !COMPANION_FLAG("Stay") &&
-      Follow(eState, now)) {
+  if (!companionWalk && aiState->HasFollowTarget() &&
+      !COMPANION_FLAG("Stay") && Follow(eState, now)) {
     return false;
   }
 
@@ -1849,6 +1867,125 @@ bool AIManager::Follow(const std::shared_ptr<ActiveEntityState>& eState,
   }
 
   return false;
+}
+
+int8_t AIManager::CompanionFollow(
+    const std::shared_ptr<ActiveEntityState>& eState, uint64_t now) {
+  auto aiState = eState->GetAIState();
+  auto zone = eState->GetZone();
+  if (!zone || eState->GetActivatedAbility() || !eState->CanMove() ||
+      eState->StatusTimesKeyExists(STATUS_WAITING)) {
+    return 0;
+  }
+
+  auto owner = zone->GetActiveEntity(aiState->GetFollowEntityID());
+  if (!owner || !owner->Ready()) {
+    return 0;
+  }
+
+  if (aiState->GetDespawnTimeout()) {
+    aiState->SetDespawnTimeout(0);
+  }
+
+  if (aiState->IsFollowing()) {
+    // Caught up after a fight
+    aiState->SetStatus(aiState->GetDefaultStatus());
+    aiState->ResetStatusChanged();
+  }
+
+  owner->RefreshCurrentPosition(now);
+  eState->RefreshCurrentPosition(now);
+
+  float back = FOLLOW_DISTANCE_COMPANION_CLOSE;
+  float startDist = FOLLOW_DISTANCE_COMPANION;
+  // The second demon walks on one side, a minion on the other
+  float side = (COMPANION_FLAG("Minion") ? -1.f : 1.f) *
+               CompanionParam(aiState, "FollowSide", 80.f);
+
+  Point o(owner->GetCurrentX(), owner->GetCurrentY());
+  Point e(eState->GetCurrentX(), eState->GetCurrentY());
+  Point ownerDest(owner->GetDestinationX(), owner->GetDestinationY());
+  float ownerLeft = o.GetDistance(ownerDest);
+
+  // Own full speed (no boost)
+  int16_t oldBoost = eState->GetSpeedBoost();
+  eState->SetSpeedBoost(0);
+  float fullSpeed = eState->GetMovementSpeed();
+  float speed = fullSpeed;
+
+  Point aim;
+  if (owner->IsMoving() && ownerLeft >= 1.f) {
+    // Direction the owner walks in and the place behind it
+    float ux = (ownerDest.x - o.x) / ownerLeft;
+    float uy = (ownerDest.y - o.y) / ownerLeft;
+
+    // Position along the walking direction (0 = the owner) and the place
+    // it should keep (behind the owner)
+    float along = (e.x - o.x) * ux + (e.y - o.y) * uy;
+    float gap = along + back;  // > 0: ahead of its place, < 0: behind
+
+    // Aim a little ahead so it keeps walking, but never past the place
+    // behind where the owner stops
+    float ownerSpeed = owner->GetMovementSpeed();
+    float aimAlong = std::min(-back + std::max(200.f, ownerSpeed),
+                              ownerLeft - back);
+    aim = Point(o.x + ux * aimAlong - uy * side, o.y + uy * aimAlong + ux * side);
+
+    // Walk at the owner's speed, faster when behind, slower when ahead
+    float rate = std::max(0.5f, std::min(1.6f, 1.f - gap / 300.f));
+    speed = std::min(fullSpeed, ownerSpeed * rate);
+    if (speed < 10.f) {
+      speed = fullSpeed;
+    }
+  } else {
+    // The owner stands still: stay unless too far, then walk up to it
+    float dist = e.GetDistance(o);
+    if (dist <= startDist && (!eState->IsMoving() || dist <= back)) {
+      if (eState->IsMoving()) {
+        eState->Stop(now);
+        eState->SetSpeedBoost(0);
+        return 1;
+      }
+
+      return 0;
+    }
+
+    if (dist < 1.f) {
+      eState->SetSpeedBoost(oldBoost);
+      return 0;
+    }
+
+    aim = Point(o.x + (e.x - o.x) / dist * back,
+                o.y + (e.y - o.y) / dist * back);
+  }
+
+  // Keep the place inside the map (as seen from the owner)
+  float aimDist = o.GetDistance(aim);
+  if (aimDist > 1.f) {
+    aim = mServer.lock()->GetZoneManager()->GetLinearPoint(
+        o.x, o.y, aim.x, aim.y, aimDist, false, zone);
+  }
+
+  int16_t boost = (int16_t)std::round((speed - fullSpeed) / 10.f);
+
+  // Nothing new to do: same place, same speed
+  Point curDest(eState->GetDestinationX(), eState->GetDestinationY());
+  if ((eState->IsMoving() && curDest.GetDistance(aim) < 40.f &&
+       std::abs(boost - oldBoost) < 3) ||
+      (!eState->IsMoving() && e.GetDistance(aim) < 30.f)) {
+    eState->SetSpeedBoost(oldBoost);
+    return 0;
+  }
+
+  Point collidePoint;
+  if (zone->Collides(Line(e, aim), collidePoint)) {
+    // Something is in the way: find a path to the owner instead
+    return Chase(eState, owner->GetEntityID(), back) ? 2 : 0;
+  }
+
+  eState->SetSpeedBoost(boost);
+  eState->Move(aim.x, aim.y, now);
+  return 1;
 }
 
 void AIManager::Move(const std::shared_ptr<ActiveEntityState>& eState,
