@@ -896,6 +896,9 @@ void ZoneManager::LeaveZone(
   auto dState = state->GetDemonState();
   auto worldCID = state->GetWorldCID();
 
+  // The second demon (prototype) stays with the character only in one zone
+  characterManager->DismissSubDemon(client);
+
   // Cancel any active skills
   for (auto eState : {std::dynamic_pointer_cast<ActiveEntityState>(cState),
                       std::dynamic_pointer_cast<ActiveEntityState>(dState)}) {

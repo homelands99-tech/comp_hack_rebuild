@@ -28,6 +28,8 @@
         <member type="Team*" name="Team" nulldefault="true"/>
         <member type="Match*" name="PendingMatch" nulldefault="true"/>
         <member type="s8" name="StatusIcon"/>
+        <member type="s32" name="SubDemonEntityID"/>
+        <member type="Demon*" name="SubDemon" nulldefault="true"/>
         <member type="map" name="EventCounters">
             <key type="s32"/>
             <value type="EventCounter*"/>

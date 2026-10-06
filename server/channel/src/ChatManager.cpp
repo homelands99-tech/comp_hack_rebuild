@@ -137,6 +137,7 @@ ChatManager::ChatManager(const std::weak_ptr<ChannelServer>& server)
   mGMands["resolve"] = &ChatManager::GMCommand_Resolve;
   mGMands["reunion"] = &ChatManager::GMCommand_Reunion;
   mGMands["scrap"] = &ChatManager::GMCommand_Scrap;
+  mGMands["sub"] = &ChatManager::GMCommand_SubDemon;
   mGMands["skill"] = &ChatManager::GMCommand_Skill;
   mGMands["forgetskill"] = &ChatManager::GMCommand_ForgetSkill;
   mGMands["skillpoint"] = &ChatManager::GMCommand_SkillPoint;
@@ -2200,6 +2201,11 @@ bool ChatManager::GMCommand_Help(
         "Perform reunion on your currently summoned demon setting",
         "the normal TYPE [1-12] and RANK or explicit growth TYPE",
         "by ID if no RANK specified."}},
+      {"sub",
+       {"@sub list|SLOT|off",
+        "Prototype: brings out the demon in COMP slot SLOT (1 based) as an",
+        "AI controlled ally that follows you. 'list' shows the COMP and",
+        "'off' removes it."}},
       {"scrap",
        {"@scrap SLOT [NAME]",
         "Removes the item in slot SLOT from the character's",
@@ -3255,6 +3261,72 @@ bool ChatManager::GMCommand_Quest(
   server->GetEventManager()->UpdateQuest(client, (int16_t)questID, phase, true);
 
   return true;
+}
+
+bool ChatManager::GMCommand_SubDemon(
+    const std::shared_ptr<channel::ChannelClientConnection>& client,
+    const std::list<libcomp::String>& args) {
+  if (!HaveUserLevel(client, SVR_CONST.GM_CMD_LVL_LEVEL_UP)) {
+    return true;
+  }
+
+  auto server = mServer.lock();
+  auto characterManager = server->GetCharacterManager();
+  auto definitionManager = server->GetDefinitionManager();
+  auto state = client->GetClientState();
+  auto character = state->GetCharacterState()->GetEntity();
+  auto comp = character ? character->GetCOMP().Get() : nullptr;
+  if (!comp) {
+    return true;
+  }
+
+  libcomp::String arg = args.empty() ? "" : args.front().ToLower();
+  if (arg.IsEmpty() || arg == "list") {
+    SendChatMessage(client, ChatType_t::CHAT_SELF,
+                    "使い方: @sub 番号（2 体目を出す） / @sub off / @sub list");
+    auto active = state->GetDemonState()->GetEntity();
+    auto sub = state->GetSubDemon().Get();
+    for (size_t i = 0; i < comp->DemonsCount(); i++) {
+      auto d = comp->GetDemons(i).Get();
+      if (!d) {
+        continue;
+      }
+
+      auto def = definitionManager->GetDevilData(d->GetType());
+      libcomp::String name = def ? def->GetBasic()->GetName() : "?";
+      SendChatMessage(
+          client, ChatType_t::CHAT_SELF,
+          libcomp::String("%1: %2 Lv%3%4")
+              .Arg((uint32_t)(i + 1))
+              .Arg(name)
+              .Arg((int32_t)d->GetCoreStats()->GetLevel())
+              .Arg(d == active ? "（召喚中）" : (d == sub ? "（2 体目）" : "")));
+    }
+
+    return true;
+  }
+
+  if (arg == "off") {
+    return SendChatMessage(client, ChatType_t::CHAT_SELF,
+                           characterManager->DismissSubDemon(client)
+                               ? "2 体目を戻しました。"
+                               : "2 体目は出ていません。");
+  }
+
+  bool ok = false;
+  int32_t slot = arg.ToInteger<int32_t>(&ok);
+  if (!ok || slot < 1) {
+    return SendChatMessage(client, ChatType_t::CHAT_SELF,
+                           "使い方: @sub 番号（2 体目を出す） / @sub off / @sub list");
+  }
+
+  libcomp::String error;
+  if (!characterManager->SummonSubDemon(client, (size_t)(slot - 1), error)) {
+    return SendChatMessage(client, ChatType_t::CHAT_SELF, error);
+  }
+
+  return SendChatMessage(client, ChatType_t::CHAT_SELF,
+                         "2 体目を出しました（自動で戦います）。@sub off で戻します。");
 }
 
 bool ChatManager::GMCommand_Scrap(

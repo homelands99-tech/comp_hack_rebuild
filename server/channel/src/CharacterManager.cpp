@@ -113,7 +113,9 @@
 #include <WorldSharedConfig.h>
 
 // channel Includes
+#include "AIManager.h"
 #include "AIState.h"
+#include "AllyState.h"
 #include "ActionManager.h"
 #include "ChannelServer.h"
 #include "ChatManager.h"
@@ -1362,6 +1364,111 @@ void CharacterManager::SendAutoRecovery(
   }
 }
 
+bool CharacterManager::SummonSubDemon(
+    const std::shared_ptr<channel::ChannelClientConnection>& client,
+    size_t slot, libcomp::String& error) {
+  auto state = client->GetClientState();
+  auto cState = state->GetCharacterState();
+  auto character = cState->GetEntity();
+  auto zone = cState->GetZone();
+  auto comp = character ? character->GetCOMP().Get() : nullptr;
+  if (!zone || !comp) {
+    error = "ゾーンか COMP が見つかりません。";
+    return false;
+  }
+
+  if (slot >= comp->DemonsCount()) {
+    error = "COMP の番号が範囲の外です。";
+    return false;
+  }
+
+  auto demon = comp->GetDemons(slot).Get();
+  if (!demon) {
+    error = "その番号の COMP は空です。";
+    return false;
+  }
+
+  if (state->GetDemonState()->GetEntity() == demon) {
+    error = "召喚中の仲魔は 2 体目にできません。";
+    return false;
+  }
+
+  auto ds = demon->GetCoreStats().Get();
+  if (!ds || ds->GetHP() <= 0) {
+    error = "その仲魔は戦えない状態です（HP 0）。";
+    return false;
+  }
+
+  DismissSubDemon(client);
+
+  auto server = mServer.lock();
+  auto zoneManager = server->GetZoneManager();
+  auto definitionManager = server->GetDefinitionManager();
+
+  // Appear a little behind the character
+  cState->RefreshCurrentPosition(ChannelServer::GetServerTime());
+  float rot = cState->GetCurrentRotation();
+  float x = cState->GetCurrentX() - 150.f * (float)cos(rot);
+  float y = cState->GetCurrentY() - 150.f * (float)sin(rot);
+
+  auto eState = zoneManager->CreateAlly(zone, demon->GetType(), 0, x, y, rot);
+  if (!eState) {
+    error = "味方 NPC を作れませんでした。";
+    return false;
+  }
+
+  // Copy the demon's level and base stats
+  auto stats = eState->GetCoreStats();
+  stats->SetLevel(ds->GetLevel());
+  stats->SetSTR(ds->GetSTR());
+  stats->SetMAGIC(ds->GetMAGIC());
+  stats->SetVIT(ds->GetVIT());
+  stats->SetINTEL(ds->GetINTEL());
+  stats->SetSPEED(ds->GetSPEED());
+  stats->SetLUCK(ds->GetLUCK());
+  eState->RecalculateStats(definitionManager);
+  stats->SetHP(eState->GetMaxHP());
+  stats->SetMP(eState->GetMaxMP());
+
+  std::list<std::shared_ptr<ActiveEntityState>> eStates = {eState};
+  std::list<std::shared_ptr<objects::Action>> noActions;
+  if (!zoneManager->AddEnemiesToZone(eStates, zone, false, false, noActions)) {
+    error = "味方 NPC をゾーンに出せませんでした。";
+    return false;
+  }
+
+  // Follow the character
+  auto aiState = eState->GetAIState();
+  if (aiState) {
+    aiState->SetFollowEntityID(cState->GetEntityID());
+    aiState->SetDespawnWhenLost(false);
+  }
+
+  state->SetSubDemonEntityID(eState->GetEntityID());
+  state->SetSubDemon(demon);
+
+  return true;
+}
+
+bool CharacterManager::DismissSubDemon(
+    const std::shared_ptr<channel::ChannelClientConnection>& client) {
+  auto state = client->GetClientState();
+  int32_t entityID = state->GetSubDemonEntityID();
+  state->SetSubDemonEntityID(0);
+  state->SetSubDemon(NULLUUID);
+  if (!entityID) {
+    return false;
+  }
+
+  auto zone = state->GetCharacterState()->GetZone();
+  if (zone && zone->GetActiveEntity(entityID)) {
+    zone->RemoveEntity(entityID);
+    mServer.lock()->GetZoneManager()->RemoveEntitiesFromZone(zone, {entityID});
+  }
+
+  return true;
+}
+
 void CharacterManager::SummonDemon(
     const std::shared_ptr<channel::ChannelClientConnection>& client,
     int64_t demonID, bool updatePartyState) {
@@ -1378,6 +1485,10 @@ void CharacterManager::SummonDemon(
           state->GetObjectUUID(demonID)));
   if (!demon || !zone) {
     return;
+  }
+
+  if (state->GetSubDemon().Get() == demon) {
+    DismissSubDemon(client);
   }
 
   auto server = mServer.lock();

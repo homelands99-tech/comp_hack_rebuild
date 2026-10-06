@@ -291,6 +291,28 @@ class CharacterManager {
   void SendAutoRecovery(const std::shared_ptr<ChannelClientConnection>& client);
 
   /**
+   * Prototype: bring out a second demon from the COMP as an AI controlled
+   * ally that follows the character and fights on its own. It copies the
+   * demon's level and base stats. Only one second demon at a time; it is
+   * removed when the character leaves the zone or summons that demon.
+   * @param client Pointer to the client connection
+   * @param slot COMP slot of the demon (0 based)
+   * @param error Output message when it fails
+   * @return true if the ally was created
+   */
+  bool SummonSubDemon(
+      const std::shared_ptr<channel::ChannelClientConnection>& client,
+      size_t slot, libcomp::String& error);
+
+  /**
+   * Remove the client's second demon (see SummonSubDemon) if it exists.
+   * @param client Pointer to the client connection
+   * @return true if one was removed
+   */
+  bool DismissSubDemon(
+      const std::shared_ptr<channel::ChannelClientConnection>& client);
+
+  /**
    * Summon the demon matching the supplied ID on the client's character.
    * @param client Pointer to the client connection containing
    *  the character
