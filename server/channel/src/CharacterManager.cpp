@@ -2028,19 +2028,23 @@ bool CharacterManager::SwitchInventoryPage(
   auto character = state->GetCharacterState()->GetEntity();
   auto inventory = character ? character->GetItemBoxes(0).Get() : nullptr;
   if (!inventory) {
-    error = "インベントリが見つかりません。";
+    error = mServer.lock()->GetCustomMessage("BAG_NO_INVENTORY",
+                                             "インベントリが見つかりません。");
     return false;
   }
 
   if (page < 1 || page > INVENTORY_PAGE_COUNT) {
-    error = libcomp::String("ページは 1 から %1 で指定してください。")
+    error = mServer.lock()
+                ->GetCustomMessage("BAG_PAGE_RANGE",
+                                   "ページは 1 から %1 で指定してください。")
                 .Arg(INVENTORY_PAGE_COUNT);
     return false;
   }
 
   // Moving items around during a trade or similar would break it.
   if (state->GetExchangeSession()) {
-    error = "取引中はページを切り替えられません。";
+    error = mServer.lock()->GetCustomMessage(
+        "BAG_IN_TRADE", "取引中はページを切り替えられません。");
     return false;
   }
 
@@ -2049,12 +2053,15 @@ bool CharacterManager::SwitchInventoryPage(
 
   uint8_t current = GetCurrentInventoryPage(character);
   if (!current) {
-    error = "ページの情報が壊れています。管理者に連絡してください。";
+    error = mServer.lock()->GetCustomMessage(
+        "BAG_BROKEN", "ページの情報が壊れています。管理者に連絡してください。");
     return false;
   }
 
   if (page == current) {
-    error = libcomp::String("すでにページ %1 です。").Arg(page);
+    error = mServer.lock()
+                ->GetCustomMessage("BAG_ALREADY", "すでにページ %1 です。")
+                .Arg(page);
     return false;
   }
 
@@ -2105,8 +2112,10 @@ bool CharacterManager::SwitchInventoryPage(
   }
 
   if (incoming.size() + stayingCount > slotCount) {
-    error = libcomp::String(
-                "装備中のアイテムと通貨（マッカ・マグネタイト）があるため、"
+    error = mServer.lock()
+                ->GetCustomMessage(
+                    "BAG_NOT_ENOUGH_SLOTS",
+                    "装備中のアイテムと通貨（マッカ・マグネタイト）があるため、"
                 "ページ %1 のアイテムが入りきりません。"
                 "装備を外すか、ページ %1 のアイテムを減らしてください。")
                 .Arg(page);
@@ -2169,8 +2178,10 @@ bool CharacterManager::SwitchInventoryPage(
       gathered);
   if (leftOver) {
     // Not an error: the switch itself worked
-    error = libcomp::String(
-                "空き枠が足りず、他のページのマッカ・マグネタイトを %1 個"
+    error = server
+                ->GetCustomMessage(
+                    "BAG_CURRENCY_LEFT",
+                    "空き枠が足りず、他のページのマッカ・マグネタイトを %1 個"
                 "移せませんでした。空きを作ってから @bag を実行してください。")
                 .Arg((uint32_t)leftOver);
   }

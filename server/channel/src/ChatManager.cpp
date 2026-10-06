@@ -3908,7 +3908,8 @@ bool ChatManager::GMCommand_Bag(
 
   if (!argsCopy.empty() && !GetIntegerArg<uint8_t>(page, argsCopy)) {
     return SendChatMessage(client, ChatType_t::CHAT_SELF,
-                           "使い方: @bag または @bag ページ番号(1-5)");
+                           server->GetCustomMessage(
+                               "BAG_USAGE", "使い方: @bag または @bag ページ番号(1-5)"));
   }
 
   if (page) {
@@ -3927,7 +3928,8 @@ bool ChatManager::GMCommand_Bag(
   uint8_t current = characterManager->GetInventoryPages(client, counts);
   if (!current) {
     return SendChatMessage(client, ChatType_t::CHAT_SELF,
-                           "インベントリのページ情報を取得できません。");
+                           server->GetCustomMessage(
+                               "BAG_NO_PAGES", "インベントリのページ情報を取得できません。"));
   }
 
   libcomp::String summary;
@@ -3940,10 +3942,12 @@ bool ChatManager::GMCommand_Bag(
 
   if (page) {
     SendChatMessage(client, ChatType_t::CHAT_SELF,
-                    libcomp::String("ページ %1 に切り替えました。").Arg(page));
+                    server->GetCustomMessage("BAG_SWITCHED", "ページ %1 に切り替えました。")
+                        .Arg(page));
   } else {
     SendChatMessage(client, ChatType_t::CHAT_SELF,
-                    libcomp::String("現在のページ: %1 (切り替え: @bag 番号)")
+                    server->GetCustomMessage("BAG_CURRENT",
+                                             "現在のページ: %1 (切り替え: @bag 番号)")
                         .Arg(current));
   }
 
