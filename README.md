@@ -1,62 +1,80 @@
-# COMP\_hack #
+# COMP_hack（ソース再建版） #
 
 [![AGPL License](http://img.shields.io/badge/license-AGPL-brightgreen.svg)](https://opensource.org/licenses/AGPL-3.0)
-[![Latest Release](https://img.shields.io/github/downloads/comphack/comp_hack/v4.12.2-wyrd-hotfix2/total.svg)](https://github.com/comphack/comp_hack/releases/tag/v4.12.2-wyrd-hotfix2)
-[![Discord Chat](https://img.shields.io/discord/322024695266541579.svg?label=&logo=discord&logoColor=ffffff&color=7389D8&labelColor=6A7EC2)](http://discord.gg/9jXeKcJ)
 
-[![Build Status](https://github.com/comphack/comp_hack/actions/workflows/ci.yml/badge.svg)](https://github.com/comphack/comp_hack/actions/workflows/ci.yml)
-[![Coverity Scan Build Status](https://scan.coverity.com/projects/9671/badge.svg)](https://scan.coverity.com/projects/comphack-comp_hack)
-[![Coverage Status](https://coveralls.io/repos/github/comphack/comp_hack/badge.svg?branch=develop)](https://coveralls.io/github/comphack/comp_hack?branch=develop)
-[![Documentation Status](https://readthedocs.org/projects/comp-hack/badge/?version=latest)](https://comp-hack.readthedocs.io/en/latest/?badge=latest)
+真・女神転生IMAGINE（Shin Megami Tensei IMAGINE）のサーバーエミュレーター
+[COMP_hack](docs/README.upstream.md) を、**ソースコードから再びビルドできるようにした**
+リポジトリです。独自の機能追加も行っています。
 
-## Shin Megami Tensei IMAGINE (真・女神転生IMAGINE) Private Server ##
+*English summary: This is COMP_hack (SMT IMAGINE server emulator) made buildable
+again. The original `libcomp`, `sqrat` and dependency repositories are gone, so
+they are vendored here (reconstructed where needed). See
+[docs/fork/RECONSTRUCTION.md](docs/fork/RECONSTRUCTION.md). Build on Windows
+with `windows_build.bat all`.*
 
-The is server software to revive an MMO that has been shutdown (SMT: IMAGINE). It's a complete re-implementation of the server from scratch and fully open source. The best place for documentation is the [Definitive Guide](https://comp-hack.readthedocs.io/en/latest/) so be sure to check it out. If you need additional support or have a question, stop by the [Discord](http://discord.gg/9jXeKcJ) server (be sure to read the rules channel to get to the community discussion) or start a [GitHub discussion](https://github.com/comphack/comp_hack/discussions).
+## このリポジトリについて ##
 
-### Building on Linux ###
+- ベース: [HyperChiicken/SMT](https://github.com/HyperChiicken/SMT) の `develop`
+  （コミット `95b6ae26`、2022-04-08）。元の COMP_hack の最終版に相当します。
+- 元のリポジトリが参照していた `libcomp`・`sqrat`・`datastore` や依存ライブラリの
+  取得先は削除されていて、そのままではビルドできませんでした。
+  このリポジトリでは、それらを同梱（必要な部分は再建）してビルドできるようにしています。
+  経緯と方法は [docs/fork/RECONSTRUCTION.md](docs/fork/RECONSTRUCTION.md) を参照してください。
+- ゲームのクライアントやそのデータ（BinaryData など）、サーバー用の
+  ゲームデータ（datastore）は含みません。
 
-You only need to build the project if you are on a Linux system that doesn't have a package (there is a [PPA](https://launchpad.net/~compomega/+archive/ubuntu/comphack) for Ubuntu-based systems) or you want to contribute. That being said, if you wish to contribute, Linux is the preferred build and run environment for the server. Of course you can build and develop with Visual Studio 2015 on Windows if that's your thing.
+## 追加した機能 ##
 
-#### Dependencies ####
+| 機能 | 説明 | 設定 |
+|---|---|---|
+| 原料タンク自動収納 | 拾った素材を原料タンクへ自動で収納します | `constants.xml` の `AUTO_MATERIAL_TANK`（既定: 無効） |
 
-First thing you want to do is download some dependencies. Make sure you have GCC 5+ or Clang with C++14 support. Here is a command for Debian/Ubuntu based distros to pull in packages you may need:
+詳しくは [docs/fork/FEATURES.md](docs/fork/FEATURES.md) を参照してください。
+変更履歴は [docs/fork/CHANGELOG.md](docs/fork/CHANGELOG.md) にあります。
+
+## ビルド方法（Windows 64bit） ##
+
+### 必要なもの ###
+
+- **Visual Studio 2022**（Community で可）
+  - ワークロード「C++ によるデスクトップ開発」
+  - 個別のコンポーネント「MSVC v141 - VS 2017 C++ x64/x86 ビルド ツール」
+    （元の配布版と同じコンパイラです）
+- **Qt 5**（MSVC 2015 / 2017 64bit 版。例: Qt 5.10.1 の `msvc2015_64`）
+  - 既定の場所は `C:\Qt\Qt5.10.1\5.10.1\msvc2015_64` です。別の場所の場合は
+    環境変数 `QT_DIR` にそのフォルダを設定してください。
+- **Git for Windows**
+
+### 手順 ###
+
+```bat
+git clone https://github.com/homelands99-tech/comp_hack_rebuild.git comp_hack
+cd comp_hack
+git submodule update --init
+windows_build.bat all
 ```
-sudo apt-get install build-essential cmake docbook-xsl doxygen texlive-font-utils xmlto libqt5webkit5-dev
-```
 
-#### Building ####
+- 初回は依存ライブラリ（`deps/*.zip`）のビルドも行うため時間がかかります。
+- できあがったサーバーは `build\bin\` に出力されます:
+  `comp_lobby.exe`、`comp_world.exe`、`comp_channel.exe`
+- ソースを変更した後は `windows_build.bat build` だけで再ビルドできます。
+  特定のものだけ作る場合は `windows_build.bat build comp_channel` のように指定します。
 
-> Make sure to initialize and update the submodules before trying to build!
+### 既存のサーバーに使う ###
 
-That should be all you need. Just build the project now:
-```
-mkdir build
-cd build
-cmake -DNO_WARNINGS=ON ..
-make
-```
+できあがった exe で、既存のサーバーフォルダの同名ファイルを置き換えます
+（置き換える前に元のファイルをバックアップしてください）。
+設定ファイル（`config\*.xml`）、データベース、datastore はそのまま使えます。
+サーバーの設定方法は [Definitive Guide](https://comp-hack.readthedocs.io/en/latest/) を参照してください。
 
-See the [Definitive Guide](https://comp-hack.readthedocs.io/en/latest/chapters/hacking.html#build-system) for more information on the build system options and how to setup the server.
+## ライセンス ##
 
-### Building on Windows ###
+COMP_hack は [GNU Affero General Public License v3](LICENSE.AGPL) で公開されています。
+このリポジトリの変更も同じライセンスです。
+改造したサーバーを配布したり、ネットワーク経由で他の人に使わせたりする場合は、
+利用者がそのサーバーの対応するソースコードを入手できるようにする必要があります。
 
-If you do not wish to contribute to the project, download from the [Releases](https://github.com/comphack/comp_hack/releases) section or download the nightly artifact off the [AppVeyor](https://ci.appveyor.com/project/compomega/comp-hack/history) page.
+同梱している依存ライブラリ（`deps/`）は、それぞれのライセンスに従います。
 
-#### Required Dependencies ####
-
-* [Visual Studio 2015](https://visualstudio.microsoft.com/vs/older-downloads/)
-* [CMake](https://cmake.org)
-* [Qt 5.7+](https://www.qt.io)
-
-#### Optional Dependencies ####
-
-* [Doxygen](http://www.doxygen.nl)
-* [WiX Toolset](http://wixtoolset.org)
-
-#### Building ####
-
-> Make sure to initialize and update the submodules before trying to build!
-
-Edit the _vsbuild_x86.bat_ and _vsbuild_x64.bat_ batch files to point to your install of Qt. Run the desired script and you should see a _build32_ or _build64_ folder. Inside the folder should be a comp_hack.sln solution file. Open the solution and build as normal.
-
-See the [Definitive Guide](https://comp-hack.readthedocs.io/en/latest/chapters/hacking.html#build-system) for more information on the build system options and how to setup the server.
+Shin Megami Tensei は株式会社アトラス（旧 Index Corporation）の登録商標です。
+このプロジェクトは非公式のものであり、権利者とは関係ありません。

@@ -485,6 +485,15 @@ const std::shared_ptr<objects::MiItemData> DefinitionManager::GetItemData(
   return nullptr;
 }
 
+libcomp::String DefinitionManager::GetItemName(uint32_t id) {
+  auto iter = mCItemNames.find(id);
+  if (iter != mCItemNames.end()) {
+    return iter->second;
+  }
+
+  return libcomp::String();
+}
+
 const std::shared_ptr<objects::MiNPCBarterData>
 DefinitionManager::GetNPCBarterData(uint16_t id) {
   return GetRecordByID(id, mNPCBarterData);
@@ -761,6 +770,7 @@ bool DefinitionManager::LoadData<objects::MiCItemData>(DataStore *pDataStore) {
   for (auto record : records) {
     auto id = record->GetBaseData()->GetID();
     auto name = record->GetBaseData()->GetName();
+    mCItemNames[id] = name;
     if (mCItemNameLookup.find(name) == mCItemNameLookup.end()) {
       mCItemNameLookup[name] = id;
     }

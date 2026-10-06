@@ -466,6 +466,13 @@ class DefinitionManager {
       const libcomp::String& name);
 
   /**
+   * Get the (client) name of an item.
+   * @param id Item ID
+   * @return Name of the item or an empty string if it is not known
+   */
+  libcomp::String GetItemName(uint32_t id);
+
+  /**
    * Get the mission definition corresponding to an ID
    * @param id Mission ID to retrieve
    * @return Pointer to the matching mission definition, null if it does
@@ -993,6 +1000,9 @@ class DefinitionManager {
 
   /// Map of item names to IDs
   std::unordered_map<libcomp::String, uint32_t> mCItemNameLookup;
+
+  /// Map of item IDs to names
+  std::unordered_map<uint32_t, libcomp::String> mCItemNames;
 
   /// Map of devil book definitions by ID
   std::unordered_map<uint32_t, std::shared_ptr<objects::MiDevilBookData>>

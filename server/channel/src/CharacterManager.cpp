@@ -90,6 +90,7 @@
 #include <MiGuardianUnlockData.h>
 #include <MiItemBasicData.h>
 #include <MiItemData.h>
+#include <MiTankData.h>
 #include <MiMitamaReunionBonusData.h>
 #include <MiMitamaReunionSetBonusData.h>
 #include <MiMitamaUnionBonusData.h>
@@ -118,6 +119,7 @@
 #include "AIState.h"
 #include "ActionManager.h"
 #include "ChannelServer.h"
+#include "ChatManager.h"
 #include "ChannelSyncManager.h"
 #include "CultureMachineState.h"
 #include "EventManager.h"
@@ -6130,6 +6132,102 @@ void CharacterManager::SendMaterials(
   }
 
   client->SendPacket(p);
+}
+
+uint32_t CharacterManager::GetMaterialTankSpace(
+    const std::shared_ptr<objects::Character>& character, uint32_t itemType) {
+  if (!HasValuable(character, SVR_CONST.VALUABLE_MATERIAL_TANK)) {
+    return 0;
+  }
+
+  auto definitionManager = mServer.lock()->GetDefinitionManager();
+
+  // Same rules as inserting a material by hand (MaterialInsert): the item
+  // needs a tank entry and a disassembly trigger.
+  if (!definitionManager->GetDisassemblyTriggerData(itemType)) {
+    return 0;
+  }
+
+  int32_t maxStack = 0;
+  for (auto& pair : definitionManager->GetTankData()) {
+    if (pair.second->GetItemID() == itemType) {
+      maxStack = pair.second->GetMaxStack();
+      break;
+    }
+  }
+
+  // Tank counts are stored as 16 bit values.
+  if (maxStack > 65535) {
+    maxStack = 65535;
+  }
+
+  int32_t current = (int32_t)character->GetMaterials(itemType);
+
+  return maxStack > current ? (uint32_t)(maxStack - current) : 0;
+}
+
+std::unordered_map<uint32_t, uint32_t> CharacterManager::StoreInMaterialTank(
+    const std::shared_ptr<ChannelClientConnection>& client,
+    std::unordered_map<uint32_t, uint32_t>& items) {
+  std::unordered_map<uint32_t, uint32_t> stored;
+
+  auto state = client->GetClientState();
+  auto character = state->GetCharacterState()->GetEntity();
+  if (!character) {
+    return stored;
+  }
+
+  for (auto it = items.begin(); it != items.end();) {
+    uint32_t space = GetMaterialTankSpace(character, it->first);
+    uint32_t amount = std::min(space, it->second);
+
+    if (amount > 0) {
+      character->SetMaterials(
+          it->first,
+          (uint16_t)(character->GetMaterials(it->first) + amount));
+      stored[it->first] = amount;
+      it->second -= amount;
+    }
+
+    if (it->second == 0) {
+      it = items.erase(it);
+    } else {
+      it++;
+    }
+  }
+
+  if (stored.empty()) {
+    return stored;
+  }
+
+  auto server = mServer.lock();
+  server->GetWorldDatabase()->QueueUpdate(character, state->GetAccountUID());
+
+  std::set<uint32_t> updates;
+  for (auto& pair : stored) {
+    updates.insert(pair.first);
+  }
+
+  SendMaterials(client, updates);
+
+  auto definitionManager = server->GetDefinitionManager();
+  for (auto& pair : stored) {
+    auto name = definitionManager->GetItemName(pair.first);
+    if (name.IsEmpty()) {
+      name = server->GetCustomMessage("MATERIAL_TANK_ITEM", "アイテム %1")
+                 .Arg(pair.first);
+    }
+
+    server->GetChatManager()->SendChatMessage(
+        client, ChatType_t::CHAT_SELF,
+        server->GetCustomMessage("MATERIAL_TANK_STORED",
+                                 "原料タンクに %1 を %2 個収納しました。（計 %3）")
+            .Arg(name)
+            .Arg(pair.second)
+            .Arg(character->GetMaterials(pair.first)));
+  }
+
+  return stored;
 }
 
 void CharacterManager::SendDevilBook(

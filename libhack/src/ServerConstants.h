@@ -465,6 +465,10 @@ class ServerConstants {
     /// Valuable ID of the material tank that stores disassembled items
     uint16_t VALUABLE_MATERIAL_TANK;
 
+    /// If looted items that can be stored in the material tank are put
+    /// there automatically (1 = on, 0 = off). Optional, defaults to off.
+    uint8_t AUTO_MATERIAL_TANK;
+
     /// Default zone to move players when no other zone is found
     uint32_t ZONE_DEFAULT;
 
