@@ -3190,6 +3190,12 @@ bool ChatManager::GMCommand_ReunionPoints(
     if (text.size() > start &&
         text.find_first_not_of("0123456789", start) == std::string::npos) {
       value = std::strtoll(text.c_str() + start, nullptr, 10);
+      if (value > INT32_MAX) {
+        // Keep "before + value" inside int64 (strtoll saturates at
+        // LLONG_MAX for huge inputs)
+        value = INT32_MAX;
+      }
+
       hasValue = true;
       argsCopy.pop_front();
     } else if (mode != 0) {
