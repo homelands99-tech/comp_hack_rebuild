@@ -78,6 +78,9 @@
 // Companions (a player's second demon) stay closer than normal followers
 #define FOLLOW_DISTANCE_COMPANION (450.f)
 
+// ...and do not drift far from their owner during combat either
+#define FOLLOW_DISTANCE_COMPANION_COMBAT (1000.f)
+
 // Companions heal their owner at or below this HP ratio
 #define COMPANION_HEAL_RATIO (0.5f)
 
@@ -1454,10 +1457,17 @@ bool AIManager::UpdateEnemyState(
       }
 
       if (best) {
+        LogAIManagerWarning([&]() {
+          return libcomp::String("[sub] switch to the owner's enemy (dist %1)\n")
+              .Arg((int32_t)bestDist);
+        });
         UpdateAggro(eState, best->GetEntityID());
         target = best;
       } else if (target->GetDistance(owner) > FOLLOW_DISTANCE_MAX) {
         // Do not chase enemies far away from the owner
+        LogAIManagerWarning([&]() {
+          return libcomp::String("[sub] drop target far from the owner\n");
+        });
         UpdateAggro(eState, -1);
         aiState->SetStatus(aiState->GetDefaultStatus());
         return false;
@@ -1685,10 +1695,20 @@ bool AIManager::Follow(const std::shared_ptr<ActiveEntityState>& eState,
 
     float maxDistance =
         aiState->IsAggro()
-            ? FOLLOW_DISTANCE_MAX
+            ? (aiState->GetCompanion() ? FOLLOW_DISTANCE_COMPANION_COMBAT
+                                       : FOLLOW_DISTANCE_MAX)
             : (aiState->GetCompanion() ? FOLLOW_DISTANCE_COMPANION
                                        : FOLLOW_DISTANCE_FAR);
     if (eState->GetDistance(followEntity) > maxDistance) {
+      if (aiState->GetCompanion() && !aiState->IsFollowing()) {
+        LogAIManagerWarning([&]() {
+          return libcomp::String("[sub] follow owner: dist %1 > %2 (status %3)\n")
+              .Arg((int32_t)eState->GetDistance(followEntity))
+              .Arg((int32_t)maxDistance)
+              .Arg((int32_t)aiState->GetStatus());
+        });
+      }
+
       // Pursue follow target
       if (Chase(eState, followEntity->GetEntityID(), FOLLOW_DISTANCE_CLOSE)) {
         // Start following
@@ -1972,6 +1992,11 @@ std::shared_ptr<ActiveEntityState> AIManager::Retarget(
 
     if (possibleTargets.size() > 0 &&
         (aiState->IsFollowing() || aiState->IsWandering())) {
+      LogAIManagerWarning([&]() {
+        return libcomp::String("[sub] owner is fighting %1 enemies, going after"
+                               " one\n")
+            .Arg((uint32_t)possibleTargets.size());
+      });
       aiState->SetStatus(AIStatus_t::AGGRO);
     }
   } else if (opponentIDs.size() > 0) {
@@ -2590,17 +2615,18 @@ bool AIManager::PrepareCompanionSkill(
 
     aiState->SetCompanionHealTime(now + COMPANION_HEAL_INTERVAL);
 
+    // Revive skills are not in the AI skill map, check every skill
+    auto definitionManager = mServer.lock()->GetDefinitionManager();
     std::list<std::shared_ptr<objects::MiSkillData>> revives;
-    for (auto& pair : skillMap) {
-      for (auto& weight : pair.second) {
-        auto skillData = weight.first;
-        if (skillData->GetTarget()->GetType() ==
-                objects::MiTargetData::Type_t::DEAD_ALLY &&
-            !eState->SkillCooldownsKeyExists(
-                skillData->GetBasic()->GetCooldownID()) &&
-            !skillManager->SkillRestricted(eState, skillData)) {
-          revives.push_back(skillData);
-        }
+    for (uint32_t skillID : eState->GetCurrentSkills()) {
+      auto skillData = definitionManager->GetSkillData(skillID);
+      if (skillData &&
+          skillData->GetTarget()->GetType() ==
+              objects::MiTargetData::Type_t::DEAD_ALLY &&
+          !eState->SkillCooldownsKeyExists(
+              skillData->GetBasic()->GetCooldownID()) &&
+          !skillManager->SkillRestricted(eState, skillData)) {
+        revives.push_back(skillData);
       }
     }
 
@@ -2736,6 +2762,11 @@ bool AIManager::PrepareSkillUsage(
       bool isHeal = pair.first == AI_SKILL_TYPE_HEAL;
       bool isDefense = pair.first == AI_SKILL_TYPE_DEF;
       bool isSupport = pair.first == AI_SKILL_TYPE_SUPPORT;
+
+      if (aiState->GetCompanion() && (isHeal || isSupport)) {
+        // Companions heal/support their owner via PrepareCompanionSkill
+        continue;
+      }
 
       if ((aiState->GetSkillSettings() & pair.first) != 0 &&
           (isSupport || isHeal ||  // No special requirement (yet)
