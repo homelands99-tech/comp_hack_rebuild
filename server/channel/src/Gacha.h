@@ -25,6 +25,9 @@
 #ifndef SERVER_CHANNEL_SRC_GACHA_H
 #define SERVER_CHANNEL_SRC_GACHA_H
 
+// libhack Includes
+#include <ServerConstants.h>
+
 // object Includes
 #include <ServerShop.h>
 #include <ServerShopTab.h>
@@ -89,8 +92,9 @@ inline bool IsTabOpen(const std::shared_ptr<ChannelServer>& server,
 }
 
 /**
- * Check if a gacha is currently shown and drawable for the client: it must
- * not be disabled and its draw tab conditions must pass.
+ * Check if a gacha is currently shown and drawable for the client: gachas
+ * must be enabled (GACHA_ENABLED), the shop must not be disabled and its
+ * draw tab conditions must pass.
  * @param server Pointer to the channel server
  * @param client Client to check for
  * @param shop Gacha shop
@@ -99,7 +103,7 @@ inline bool IsTabOpen(const std::shared_ptr<ChannelServer>& server,
 inline bool IsAvailable(const std::shared_ptr<ChannelServer>& server,
                         const std::shared_ptr<ChannelClientConnection>& client,
                         const std::shared_ptr<objects::ServerShop>& shop) {
-  if (!IsGacha(shop) || shop->GetDisabled()) {
+  if (!SVR_CONST.GACHA_ENABLED || !IsGacha(shop) || shop->GetDisabled()) {
     return false;
   }
 

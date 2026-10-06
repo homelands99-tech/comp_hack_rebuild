@@ -1867,6 +1867,14 @@ bool ChatManager::GMCommand_Gacha(
   auto server = mServer.lock();
   auto serverDataManager = server->GetServerDataManager();
 
+  if (!SVR_CONST.GACHA_ENABLED) {
+    SendChatMessage(client, ChatType_t::CHAT_SELF,
+                    server->GetCustomMessage(
+                        "GACHA_DISABLED",
+                        "Gacha shops are disabled (GACHA_ENABLED in "
+                        "constants.xml)."));
+  }
+
   std::list<libcomp::String> argsCopy = args;
   if (argsCopy.empty()) {
     // List the gacha shops

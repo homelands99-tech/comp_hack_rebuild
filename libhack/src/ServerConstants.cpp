@@ -314,6 +314,13 @@ bool ServerConstants::Initialize(const String& filePath) {
                            sConstants.AUTO_MATERIAL_TANK);
   }
 
+  // Optional: gacha shops.
+  sConstants.GACHA_ENABLED = 0;
+  if (constants.find("GACHA_ENABLED") != constants.end()) {
+    success &=
+        LoadInteger(constants["GACHA_ENABLED"], sConstants.GACHA_ENABLED);
+  }
+
   // Load other constants
   success &= LoadInteger(constants["DIGITALIZE_COOLDOWN"],
                          sConstants.DIGITALIZE_COOLDOWN);

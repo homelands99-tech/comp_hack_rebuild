@@ -46,10 +46,18 @@ CP で引き、景品は宅配に届きます。ショップ XML の `Type` を 
 
 詳しくは [GACHA.md](GACHA.md) を見てください。
 
+### 設定 ###
+
+```xml
+<constant name="GACHA_ENABLED">1</constant>
+```
+
+`0` または行が無い場合は無効です（`GACHA` のショップは一覧に出ません）。
+
 *English: Restores the client's gacha window. Shops with `Type` `GACHA` are
 listed in the COMP shop menu (needs a client that supports it, not public); drawing charges CP and
 sends a weighted random prize to the post. Toggle with `@gacha` or tab
-conditions. See GACHA.md.*
+conditions. Enable with `GACHA_ENABLED` = 1 in constants.xml. See GACHA.md.*
 
 ## 追加機能の文言（custom_messages） / Texts of the added features ##
 
