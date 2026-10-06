@@ -2606,14 +2606,17 @@ bool AIManager::PrepareCompanionSkill(
                              : nullptr;
   };
 
-  auto queue = [&](const std::shared_ptr<objects::MiSkillData>& skillData) {
+  auto queue = [&](const std::shared_ptr<objects::MiSkillData>& skillData,
+                   bool onSelf = false) {
     int32_t targetID = eState->GetEntityID();
     switch (skillData->GetTarget()->GetType()) {
       case objects::MiTargetData::Type_t::ALLY:
       case objects::MiTargetData::Type_t::ALLY_PLAYER:
       case objects::MiTargetData::Type_t::PARTY:
       case objects::MiTargetData::Type_t::DEAD_ALLY:
-        targetID = owner->GetEntityID();
+        if (!onSelf) {
+          targetID = owner->GetEntityID();
+        }
         break;
       default:
         break;
@@ -2722,6 +2725,18 @@ bool AIManager::PrepareCompanionSkill(
 
     // Nothing usable: check again a little later
     aiState->SetCompanionHealTime(now + COMPANION_HEAL_INTERVAL);
+  } else if (now >= aiState->GetCompanionHealTime() &&
+             eState->GetMaxHP() > 0 &&
+             (float)eState->GetCoreStats()->GetHP() /
+                     (float)eState->GetMaxHP() <=
+                 COMPANION_HEAL_RATIO) {
+    // The owner is fine: heal itself when low
+    auto skillData = pick(AI_SKILL_TYPE_HEAL);
+    aiState->SetCompanionHealTime(now + COMPANION_HEAL_INTERVAL);
+    if (skillData) {
+      queue(skillData, true);
+      return true;
+    }
   }
 
   if (owner->GetOpponentIDs().size() > 0 &&
