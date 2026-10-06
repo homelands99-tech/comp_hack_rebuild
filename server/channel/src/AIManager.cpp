@@ -2397,21 +2397,30 @@ bool AIManager::UpdateCompanionSkill(
     return false;
   }
 
-  if (aiState->GetCurrentCommand() ||
-      (activated->GetExecutionRequestTime() &&
-       activated->GetErrorCode() == -1) ||
-      eState->GetStatusTimes(STATUS_CHARGING)) {
-    // Busy, executing or still charging
-    return true;
-  }
-
   auto skillManager = mServer.lock()->GetSkillManager();
   auto zone = eState->GetZone();
   auto owner = zone ? zone->GetActiveEntity(ownerID) : nullptr;
   if (!owner || !owner->IsAlive() ||
       now > activated->GetActivationTime() + COMPANION_SKILL_TIMEOUT) {
-    // Owner gone or it took too long, drop the skill
+    // Owner gone or it took too long, drop the skill (checked first so a
+    // skill stuck in any state cannot hold the companion forever)
+    LogAIManagerInfo([&]() {
+      return libcomp::String("[sub] give up skill %1 (error %2, charging %3,"
+                             " cmd %4)\n")
+          .Arg(activated->GetSkillData()->GetCommon()->GetID())
+          .Arg((int32_t)activated->GetErrorCode())
+          .Arg(eState->GetStatusTimes(STATUS_CHARGING) ? "yes" : "no")
+          .Arg(aiState->GetCurrentCommand() ? "yes" : "no");
+    });
     skillManager->CancelSkill(eState, activated->GetActivationID());
+    return false;
+  }
+
+  if (aiState->GetCurrentCommand() ||
+      (activated->GetExecutionRequestTime() &&
+       activated->GetErrorCode() == -1) ||
+      eState->GetStatusTimes(STATUS_CHARGING)) {
+    // Busy, executing or still charging
     return true;
   }
 
@@ -2422,9 +2431,27 @@ bool AIManager::UpdateCompanionSkill(
                         (eState->GetHitboxSize() * 10) +
                         (skillData->GetTarget()->GetRange() * 10)) -
                 20.f;
-  if (eState->GetDistance(owner) > range) {
-    Chase(eState, ownerID, range);
+  float dist = eState->GetDistance(owner);
+  if (dist > range) {
+    bool moving = Chase(eState, ownerID, range);
+    LogAIManagerInfo([&]() {
+      return libcomp::String("[sub] skill %1 charged, owner too far %2 > %3,"
+                             " chase %4 (canMove %5)\n")
+          .Arg(skillData->GetCommon()->GetID())
+          .Arg((int32_t)dist)
+          .Arg((int32_t)range)
+          .Arg(moving ? "ok" : "FAILED")
+          .Arg(eState->CanMove() ? "yes" : "no");
+    });
   } else {
+    LogAIManagerInfo([&]() {
+      return libcomp::String("[sub] execute skill %1 on owner (dist %2 <= %3,"
+                             " last error %4)\n")
+          .Arg(skillData->GetCommon()->GetID())
+          .Arg((int32_t)dist)
+          .Arg((int32_t)range)
+          .Arg((int32_t)activated->GetErrorCode());
+    });
     aiState->QueueCommand(std::make_shared<AIUseSkillCommand>(activated));
   }
 
@@ -2454,6 +2481,18 @@ bool AIManager::PrepareCompanionSkill(
               skillData->GetBasic()->GetCooldownID()) ||
           skillManager->SkillRestricted(eState, skillData)) {
         continue;
+      }
+
+      if (type == AI_SKILL_TYPE_HEAL) {
+        // Only skills that restore HP (not cures like Patra)
+        switch (skillData->GetDamage()->GetBattleDamage()->GetFormula()) {
+          case objects::MiBattleDamageData::Formula_t::HEAL_NORMAL:
+          case objects::MiBattleDamageData::Formula_t::HEAL_STATIC:
+          case objects::MiBattleDamageData::Formula_t::HEAL_MAX_PERCENT:
+            break;
+          default:
+            continue;
+        }
       }
 
       if (type == AI_SKILL_TYPE_SUPPORT) {
@@ -2498,12 +2537,27 @@ bool AIManager::PrepareCompanionSkill(
                             (eState->GetHitboxSize() * 10) +
                             (skillData->GetTarget()->GetRange() * 10)) -
                     20.f;
-      if (eState->GetDistance(owner) > range) {
-        Chase(eState, owner->GetEntityID(), range);
+      float dist = eState->GetDistance(owner);
+      if (dist > range) {
+        bool moving = Chase(eState, owner->GetEntityID(), range);
+        LogAIManagerInfo([&]() {
+          return libcomp::String("[sub] want skill %1, owner too far %2 > %3,"
+                                 " chase %4 (canMove %5)\n")
+              .Arg(skillData->GetCommon()->GetID())
+              .Arg((int32_t)dist)
+              .Arg((int32_t)range)
+              .Arg(moving ? "ok" : "FAILED")
+              .Arg(eState->CanMove() ? "yes" : "no");
+        });
         return;
       }
     }
 
+    LogAIManagerInfo([&]() {
+      return libcomp::String("[sub] start skill %1 on %2\n")
+          .Arg(skillData->GetCommon()->GetID())
+          .Arg(targetID == owner->GetEntityID() ? "owner" : "self");
+    });
     aiState->QueueCommand(
         std::make_shared<AIUseSkillCommand>(skillData, targetID));
   };
