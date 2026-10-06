@@ -1413,7 +1413,10 @@ void CharacterManager::MarkSubDemonDead(
 }
 
 // The second demon moves this much faster than normal
-#define SUB_DEMON_MOVE_RATE (1.5)
+#define SUB_DEMON_MOVE_RATE (1.5f)
+
+// AI script of the second demon (define: script.Name)
+#define SUB_DEMON_AI_SCRIPT "subDemon"
 
 int8_t CharacterManager::RegisterSubDemon(
     const std::shared_ptr<CharacterState>& cState, int8_t mode) {
@@ -1433,6 +1436,17 @@ int8_t CharacterManager::RegisterSubDemon(
 
   if (mode == 2) {
     return character->GetSubDemon().Get() ? 1 : 0;
+  }
+
+  if (mode == 5) {
+    return character->GetSubDemonAuto() ? 1 : 0;
+  }
+
+  if (mode == 3 || mode == 4) {
+    character->SetSubDemonAuto(mode == 3);
+    server->GetWorldDatabase()->QueueUpdate(
+        character, state ? state->GetAccountUID() : character->GetAccount());
+    return mode == 3 ? 1 : 0;
   }
 
   std::shared_ptr<objects::Demon> demon;
@@ -1500,6 +1514,29 @@ bool CharacterManager::ToggleSubDemon(
 
   message = "2 体目に登録した仲魔が COMP にいません。";
   return false;
+}
+
+void CharacterManager::AutoSummonSubDemon(
+    const std::shared_ptr<channel::ChannelClientConnection>& client) {
+  auto state = client->GetClientState();
+  auto character = state->GetCharacterState()->GetEntity();
+  auto dState = state->GetDemonState();
+  if (!SVR_CONST.SUB_DEMON_ENABLED || !character ||
+      !character->GetSubDemonAuto() || state->GetSubDemonEntityID() ||
+      !dState->GetEntity() || !state->GetCharacterState()->GetZone()) {
+    return;
+  }
+
+  auto demon = character->GetSubDemon().Get();
+  if (!demon || demon == dState->GetEntity()) {
+    return;
+  }
+
+  libcomp::String message;
+  if (ToggleSubDemon(client, message)) {
+    mServer.lock()->GetChatManager()->SendChatMessage(
+        client, ChatType_t::CHAT_SELF, "2 体目を自動で呼び出しました。");
+  }
 }
 
 void CharacterManager::CheckSubDemonInCOMP(
@@ -1580,6 +1617,27 @@ bool CharacterManager::SummonSubDemon(
     return false;
   }
 
+  // The second demon's own AI script (scripts/AI/ai_subdemon.nut) holds its
+  // behaviour settings. Without it the defaults are used.
+  auto aiManager = server->GetAIManager();
+  if (!aiManager->Prepare(eState, SUB_DEMON_AI_SCRIPT)) {
+    LogGeneralWarningMsg("Second demon AI script 'subDemon' not found, using"
+                         " the default settings\n");
+  }
+
+  auto subParam = [&](const char* key, float def) {
+    auto ai = eState->GetAIState();
+    if (ai && ai->ActionOverridesKeyExists(key)) {
+      bool ok = false;
+      float v = ai->GetActionOverrides(key).ToDecimal<float>(&ok);
+      if (ok) {
+        return v;
+      }
+    }
+
+    return def;
+  };
+
   // Use the demon's learned skills (and the species traits) instead of the
   // species' enemy skill list
   auto devilData = definitionManager->GetDevilData(demon->GetType());
@@ -1622,7 +1680,8 @@ bool CharacterManager::SummonSubDemon(
   for (auto move : {CorrectTbl::MOVE1, CorrectTbl::MOVE2}) {
     extension->SetCorrectTbl(
         (size_t)move,
-        (int16_t)(battleData->GetCorrect((size_t)move) * SUB_DEMON_MOVE_RATE));
+        (int16_t)(battleData->GetCorrect((size_t)move) *
+                  subParam("MoveRate", SUB_DEMON_MOVE_RATE)));
   }
 
   eState->GetEnemyBase()->SetExtension(extension);
@@ -1671,13 +1730,11 @@ bool CharacterManager::SummonSubDemon(
     aiState->SetStrikeFirst(true);
 
     // Think faster and wait less than the species' default AI
-    aiState->SetThinkSpeed(1000);
-    aiState->SetAggression(3.f);
+    aiState->SetThinkSpeed((int32_t)subParam("ThinkSpeed", 1000.f));
+    aiState->SetAggression(subParam("Aggression", 3.f));
 
-    // Species AI scripts (typical for healers) take over the action
-    // choice and would skip the companion logic, so do not use them
-    aiState->ClearActionOverrides();
-    aiState->SetScript(nullptr);
+    // The species' AI script is not used (Prepare above used the second
+    // demon's script); its settings stay in the action overrides.
     aiState->SetNormalSkillUse(true);
   }
 
@@ -1980,6 +2037,8 @@ void CharacterManager::SummonDemon(
     state->GetPartyDemonPacket(request);
     server->GetManagerConnection()->GetWorldConnection()->SendPacket(request);
   }
+
+  AutoSummonSubDemon(client);
 }
 
 void CharacterManager::StoreDemon(

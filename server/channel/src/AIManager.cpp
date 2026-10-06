@@ -75,26 +75,58 @@
 #define FOLLOW_DISTANCE_FAR (MAX_ENTITY_DRAW_DISTANCE * 0.25f)
 #define FOLLOW_DISTANCE_CLOSE (300.f)
 
-// Companions (a player's second demon) stay closer than normal followers
-#define FOLLOW_DISTANCE_COMPANION (300.f)
+/**
+ * Companion (a player's second demon) setting set by its AI script
+ * (scripts/AI/ai_subdemon.nut, prepare: SetActionOverridesEntry), or the
+ * default value when the script does not set it.
+ * @param aiState AI state of the companion
+ * @param key Setting name
+ * @param def Default value
+ * @return Setting value
+ */
+static float CompanionParam(const std::shared_ptr<channel::AIState>& aiState,
+                            const char* key, float def) {
+  if (aiState && aiState->ActionOverridesKeyExists(key)) {
+    bool ok = false;
+    float v = aiState->GetActionOverrides(key).ToDecimal<float>(&ok);
+    if (ok) {
+      return v;
+    }
+  }
+
+  return def;
+}
+
+// Companions stay closer than normal followers...
+#define FOLLOW_DISTANCE_COMPANION \
+  CompanionParam(aiState, "FollowDistance", 300.f)
 
 // ...and walk up to this distance of the owner when catching up
-#define FOLLOW_DISTANCE_COMPANION_CLOSE (220.f)
+#define FOLLOW_DISTANCE_COMPANION_CLOSE \
+  CompanionParam(aiState, "FollowClose", 220.f)
 
 // ...and do not drift far from their owner during combat either
-#define FOLLOW_DISTANCE_COMPANION_COMBAT (750.f)
+#define FOLLOW_DISTANCE_COMPANION_COMBAT \
+  CompanionParam(aiState, "CombatFollow", 750.f)
 
 // Companions heal their owner at or below this HP ratio
-#define COMPANION_HEAL_RATIO (0.5f)
+#define COMPANION_HEAL_RATIO \
+  (CompanionParam(aiState, "HealRatio", 50.f) * 0.01f)
 
 // Companions use a support skill on their owner at most this often (us)
-#define COMPANION_SUPPORT_INTERVAL (30000000ULL)
+#define COMPANION_SUPPORT_INTERVAL \
+  ((uint64_t)(CompanionParam(aiState, "SupportInterval", 30.f) * 1000000.f))
 
 // Companions try to heal their owner at most this often (us)
-#define COMPANION_HEAL_INTERVAL (3000000ULL)
+#define COMPANION_HEAL_INTERVAL \
+  ((uint64_t)(CompanionParam(aiState, "HealInterval", 3.f) * 1000000.f))
 
 // Companions give up a skill aimed at their owner after this long (us)
-#define COMPANION_SKILL_TIMEOUT (6000000ULL)
+#define COMPANION_SKILL_TIMEOUT \
+  ((uint64_t)(CompanionParam(aiState, "SkillTimeout", 6.f) * 1000000.f))
+
+// What a companion does to help (1 = on, 0 = off)
+#define COMPANION_USE(key) (CompanionParam(aiState, key, 1.f) != 0.f)
 
 using namespace channel;
 
@@ -2693,7 +2725,7 @@ bool AIManager::PrepareCompanionSkill(
 
   if (!owner->IsAlive()) {
     // Revive the owner with any revive skill (aimed at a dead ally)
-    if (now < aiState->GetCompanionHealTime()) {
+    if (!COMPANION_USE("UseRevive") || now < aiState->GetCompanionHealTime()) {
       return false;
     }
 
@@ -2731,7 +2763,7 @@ bool AIManager::PrepareCompanionSkill(
       owner->GetMaxHP() > 0
           ? (float)owner->GetCoreStats()->GetHP() / (float)owner->GetMaxHP()
           : 1.f;
-  if (hpRatio <= COMPANION_HEAL_RATIO &&
+  if (COMPANION_USE("UseHeal") && hpRatio <= COMPANION_HEAL_RATIO &&
       now >= aiState->GetCompanionHealTime()) {
     auto skillData = pick(AI_SKILL_TYPE_HEAL);
 
@@ -2761,7 +2793,8 @@ bool AIManager::PrepareCompanionSkill(
 
     // Nothing usable: check again a little later
     aiState->SetCompanionHealTime(now + COMPANION_HEAL_INTERVAL);
-  } else if (now >= aiState->GetCompanionHealTime() &&
+  } else if (COMPANION_USE("SelfHeal") &&
+             now >= aiState->GetCompanionHealTime() &&
              eState->GetMaxHP() > 0 &&
              (float)eState->GetCoreStats()->GetHP() /
                      (float)eState->GetMaxHP() <=
@@ -2775,7 +2808,7 @@ bool AIManager::PrepareCompanionSkill(
     }
   }
 
-  if (owner->GetOpponentIDs().size() > 0 &&
+  if (COMPANION_USE("UseSupport") && owner->GetOpponentIDs().size() > 0 &&
       now >= aiState->GetCompanionSupportTime()) {
     auto skillData = pick(AI_SKILL_TYPE_SUPPORT);
     if (skillData) {

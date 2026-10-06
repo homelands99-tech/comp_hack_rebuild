@@ -309,9 +309,11 @@ class CharacterManager {
    * the registration). Used by the event script action_subdemon.
    * @param cState Character state
    * @param mode 0 = register the summoned demon, 1 = clear, 2 = only
-   *  report the state
-   * @return 1 registered (or cleared), 0 nothing registered (mode 2 / no
-   *  change), -1 the feature is off, -2 no demon is summoned, -3 error
+   *  report the state, 3 = auto summon on, 4 = auto summon off, 5 = report
+   *  the auto summon setting
+   * @return 1 registered (or cleared / auto on), 0 nothing registered (mode 2
+   *  / no change / auto off), -1 the feature is off, -2 no demon is
+   *  summoned, -3 error
    */
   int8_t RegisterSubDemon(const std::shared_ptr<CharacterState>& cState,
                           int8_t mode);
@@ -326,6 +328,14 @@ class CharacterManager {
   bool ToggleSubDemon(
       const std::shared_ptr<channel::ChannelClientConnection>& client,
       libcomp::String& message);
+
+  /**
+   * Bring out the registered second demon if the character turned on auto
+   * summon and a partner demon is out (after summoning it, entering a zone).
+   * @param client Pointer to the client connection
+   */
+  void AutoSummonSubDemon(
+      const std::shared_ptr<channel::ChannelClientConnection>& client);
 
   /**
    * Return the second demon if its demon is no longer in the COMP (moved to

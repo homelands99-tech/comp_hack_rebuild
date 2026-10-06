@@ -27,6 +27,8 @@
         <member type="Demon*" name="ActiveDemon"/>
         <!-- COMP demon registered as the second demon (SUB_DEMON_ENABLED) -->
         <member type="Demon*" name="SubDemon"/>
+        <!-- Bring out the second demon when the partner demon is summoned -->
+        <member type="bool" name="SubDemonAuto"/>
         <member type="u32" name="HomepointZone"/>
         <member type="u32" name="HomepointSpotID"/>
         <member type="u32" name="LogoutZone"/>
