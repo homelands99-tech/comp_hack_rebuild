@@ -55,6 +55,8 @@
 #include <DemonQuest.h>
 #include <DigitalizeState.h>
 #include <DropSet.h>
+#include <EnemyBase.h>
+#include <EnemyExtension.h>
 #include <EnchantSpecialData.h>
 #include <EventCounter.h>
 #include <Expertise.h>
@@ -1417,6 +1419,25 @@ bool CharacterManager::SummonSubDemon(
     return false;
   }
 
+  // Use the demon's learned skills (and the species traits) instead of the
+  // species' enemy skill list
+  auto devilData = definitionManager->GetDevilData(demon->GetType());
+  auto extension = std::make_shared<objects::EnemyExtension>();
+  extension->SetNoDefaultSkills(true);
+  for (uint32_t skillID : demon->GetLearnedSkills()) {
+    if (skillID) {
+      extension->InsertAddedSkills(skillID);
+    }
+  }
+
+  for (uint32_t traitID : devilData->GetGrowth()->GetTraits()) {
+    if (traitID) {
+      extension->InsertAddedSkills(traitID);
+    }
+  }
+
+  eState->GetEnemyBase()->SetExtension(extension);
+
   // Copy the demon's level and base stats
   auto stats = eState->GetCoreStats();
   stats->SetLevel(ds->GetLevel());
@@ -1446,6 +1467,11 @@ bool CharacterManager::SummonSubDemon(
     aiState->SetDespawnWhenLost(false);
     aiState->SetCompanion(true);
     aiState->SetStatus(AIStatus_t::WANDERING, true);
+
+    // Attack as soon as it has a target (the species' AI may only fight
+    // back) and pick skills by the normal logic
+    aiState->SetStrikeFirst(true);
+    aiState->SetNormalSkillUse(true);
   }
 
   state->SetSubDemonEntityID(eState->GetEntityID());
