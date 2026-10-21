@@ -363,6 +363,18 @@ bool ServerConstants::Initialize(const String& filePath) {
                            sConstants.SPIN_RAPID_MOVE);
   }
 
+  // Optional: max HP/MP of players and partner demons (16-bit for the client).
+  sConstants.PLAYER_HP_MP_MAX = 30000;
+  if (constants.find("PLAYER_HP_MP_MAX") != constants.end()) {
+    success &= LoadInteger(constants["PLAYER_HP_MP_MAX"],
+                           sConstants.PLAYER_HP_MP_MAX);
+    if (sConstants.PLAYER_HP_MP_MAX < 1 ||
+        sConstants.PLAYER_HP_MP_MAX > 32767) {
+      LogServerConstantsErrorMsg("PLAYER_HP_MP_MAX must be 1 to 32767\n");
+      success = false;
+    }
+  }
+
   // Optional: bulk reunion cost per rank (0 = off).
   sConstants.REUNION_BULK_COST = 0;
   if (constants.find("REUNION_BULK_COST") != constants.end()) {

@@ -7488,7 +7488,7 @@ bool SkillManager::ApplyZoneSpecificEffects(
         if (cState->SetHPMP(0, -1, false, true)) {
           SkillTargetResult target;
           target.EntityState = cState;
-          target.Damage1 = MAX_PLAYER_HP_MP;
+          target.Damage1 = SVR_CONST.PLAYER_HP_MP_MAX;
           target.Damage1Type = DAMAGE_TYPE_GENERIC;
 
           target.Flags1 |= FLAG1_LETHAL;

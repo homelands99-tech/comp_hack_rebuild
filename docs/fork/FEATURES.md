@@ -333,6 +333,37 @@ partner demons can move at normal speed while using SPIN and RAPID action type
 skills and are not fixed in place when the skill executes. The action type is
 unchanged. Enemies and allies are not affected.*
 
+## 最大 HP・MP の上限とデジタライズの HP / Max HP/MP limit and digitalize HP ##
+
+### 上限の設定 ###
+
+```xml
+<constant name="PLAYER_HP_MP_MAX">30000</constant>
+```
+
+- プレイヤーとパートナー悪魔の最大 HP・最大 MP の上限です（両方に同じ値）。敵は変わりません。
+- 1〜32767。行が無いときは元の値 30000 です。32767 より大きい値はサーバーが起動しません
+  （HP はクライアントへ 16 ビットの数で送られるため、それより大きいと表示が壊れます）。
+- クライアントも HP・MP を自分で計算していて、30,000 で止める処理を持っています。上限を変えるときは、
+  クライアントにも同じ値を入れてください。
+
+### デジタライズで最大 HP が 1 になる不具合の修正（設定なしで常に） ###
+
+デジタライズでは、仲魔の最大 HP・MP をプレイヤーに足します。仲魔の値（御霊の加護などで 32,767 を超える）
+や足した合計が 16 ビットの数からあふれてマイナスになり、最大 HP・MP が最低値の 1 になっていました。
+仲魔の値は 32,767 で止め、合計は大きな数で計算してから上限（`PLAYER_HP_MP_MAX`）で止めるようにしました。
+
+### 関係するソース ###
+
+- `libhack/src/ServerConstants.h/.cpp`: `PLAYER_HP_MP_MAX`（省略可能）
+- `server/channel/src/CharacterManager.cpp`: `AdjustStatBounds()`（上限）
+- `server/channel/src/CharacterState.cpp`: デジタライズの値と最大 HP・MP の合計
+
+*English: `PLAYER_HP_MP_MAX` (1-32767, default 30000) sets the max HP/MP limit
+of characters and partner demons. Digitalize no longer drops the max HP/MP to
+1 when the demon values or the sum pass the 16-bit limit. Based on a binary
+patch by another contributor.*
+
 ## 追加機能の文言（custom_messages） / Texts of the added features ##
 
 追加した機能がプレイヤーに出す文言（チャット欄のメッセージ・GM コマンドの表示）は、
