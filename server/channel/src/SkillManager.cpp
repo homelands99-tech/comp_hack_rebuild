@@ -150,6 +150,23 @@
 
 using namespace channel;
 
+namespace {
+// Damage, heal and drain amounts are stored and sent as signed 32-bit values:
+// stop at the largest value instead of overflowing
+int32_t ClampDamage(double value) {
+  const double limit = (double)std::numeric_limits<int32_t>::max();
+  if (value != value) {
+    return 0;
+  } else if (value >= limit) {
+    return std::numeric_limits<int32_t>::max();
+  } else if (value <= -limit) {
+    return -std::numeric_limits<int32_t>::max();
+  }
+
+  return (int32_t)value;
+}
+}  // namespace
+
 namespace libcomp {
 template <>
 BaseScriptEngine& BaseScriptEngine::Using<SkillManager>() {
@@ -273,7 +290,7 @@ class channel::ProcessingSkill {
   std::shared_ptr<objects::CalculatedEntityState> SourceExecutionState;
 
   // Keyed on entity IDs (source or fusion demons) then target entity IDs
-  std::unordered_map<int32_t, std::unordered_map<int32_t, uint16_t>>
+  std::unordered_map<int32_t, std::unordered_map<int32_t, int32_t>>
       OffenseValues;
   std::unordered_map<
       int32_t, std::unordered_map<
@@ -3832,9 +3849,10 @@ void SkillManager::ProcessSkillResultFinal(
       int32_t hpDrain = 0, mpDrain = 0;
       for (SkillTargetResult& target : skill.Targets) {
         if (target.Damage1Type == DAMAGE_TYPE_GENERIC && hpDrainPercent > 0) {
-          hpDrain = (int32_t)(hpDrain - (int32_t)floorl((float)target.Damage1 *
-                                                        (float)hpDrainPercent *
-                                                        0.01f * healRate));
+          hpDrain = ClampDamage(
+              (double)hpDrain - floor((double)target.Damage1 *
+                                      (double)hpDrainPercent * 0.01 *
+                                      (double)healRate));
 
           // Check negated limit
           if (hpDrain < -9999) {
@@ -3843,9 +3861,10 @@ void SkillManager::ProcessSkillResultFinal(
         }
 
         if (target.Damage2Type == DAMAGE_TYPE_GENERIC && mpDrainPercent > 0) {
-          mpDrain = (int32_t)(mpDrain - (int32_t)floorl((float)target.Damage2 *
-                                                        (float)mpDrainPercent *
-                                                        0.01f * healRate));
+          mpDrain = ClampDamage(
+              (double)mpDrain - floor((double)target.Damage2 *
+                                      (double)mpDrainPercent * 0.01 *
+                                      (double)healRate));
 
           // Check negated limit
           if (mpDrain < -9999) {
@@ -3895,7 +3914,8 @@ void SkillManager::ProcessSkillResultFinal(
     target.EntityState->ExpireStatusTimes(now);
 
     bool hpMpSet = false;
-    int32_t hpDamage = target.TechnicalDamage + target.PursuitDamage;
+    int32_t hpDamage = ClampDamage((double)target.TechnicalDamage +
+                                   (double)target.PursuitDamage);
     int32_t mpDamage = 0;
     if (hasBattleDamage) {
       for (int i = 0; i < 2; i++) {
@@ -3917,9 +3937,9 @@ void SkillManager::ProcessSkillResultFinal(
             break;
           default:
             if (hpMode) {
-              hpDamage = (int32_t)(hpDamage + val);
+              hpDamage = ClampDamage((double)hpDamage + (double)val);
             } else {
-              mpDamage = (int32_t)(mpDamage + val);
+              mpDamage = ClampDamage((double)mpDamage + (double)val);
             }
             break;
         }
@@ -4087,7 +4107,8 @@ void SkillManager::ProcessSkillResultFinal(
         }
       }
 
-      hpAdjustedSum += hpAdjusted;
+      hpAdjustedSum =
+          ClampDamage((double)hpAdjustedSum + (double)hpAdjusted);
 
       if (hpMpSet) {
         // Correct explicit damage
@@ -5614,7 +5635,7 @@ int8_t SkillManager::EvaluateTokuseiSkillCondition(
   return 0;
 }
 
-uint16_t SkillManager::CalculateOffenseValue(
+int32_t SkillManager::CalculateOffenseValue(
     const std::shared_ptr<ActiveEntityState>& source,
     const std::shared_ptr<ActiveEntityState>& target,
     const std::shared_ptr<ProcessingSkill>& pSkill) {
@@ -5631,40 +5652,40 @@ uint16_t SkillManager::CalculateOffenseValue(
   int16_t spell = calcState->GetCorrectTbl((size_t)CorrectTbl::SPELL);
   int16_t support = calcState->GetCorrectTbl((size_t)CorrectTbl::SUPPORT);
 
-  uint16_t off = 0;
+  int32_t off = 0;
   switch (skill.EffectiveDependencyType) {
     case SkillDependencyType_t::CLSR:
-      off = (uint16_t)clsr;
+      off = (int32_t)clsr;
       break;
     case SkillDependencyType_t::LNGR:
-      off = (uint16_t)lngr;
+      off = (int32_t)lngr;
       break;
     case SkillDependencyType_t::SPELL:
-      off = (uint16_t)spell;
+      off = (int32_t)spell;
       break;
     case SkillDependencyType_t::SUPPORT:
-      off = (uint16_t)support;
+      off = (int32_t)support;
       break;
     case SkillDependencyType_t::LNGR_SPELL:
-      off = (uint16_t)(lngr + spell / 2);
+      off = (int32_t)(lngr + spell / 2);
       break;
     case SkillDependencyType_t::SPELL_CLSR:
-      off = (uint16_t)(spell + clsr / 2);
+      off = (int32_t)(spell + clsr / 2);
       break;
     case SkillDependencyType_t::SPELL_LNGR:
-      off = (uint16_t)(spell + lngr / 2);
+      off = (int32_t)(spell + lngr / 2);
       break;
     case SkillDependencyType_t::CLSR_LNGR_SPELL:
-      off = (uint16_t)(clsr + lngr + spell);
+      off = (int32_t)(clsr + lngr + spell);
       break;
     case SkillDependencyType_t::LNGR_CLSR_SPELL:
-      off = (uint16_t)(lngr + clsr + spell);
+      off = (int32_t)(lngr + clsr + spell);
       break;
     case SkillDependencyType_t::SPELL_CLSR_LNGR:
-      off = (uint16_t)(spell + clsr + lngr);
+      off = (int32_t)(spell + clsr + lngr);
       break;
     case SkillDependencyType_t::CLSR_SPELL:
-      off = (uint16_t)(clsr + spell / 2);
+      off = (int32_t)(clsr + spell / 2);
       break;
     case SkillDependencyType_t::NONE:
     default:
@@ -5681,7 +5702,7 @@ uint16_t SkillManager::CalculateOffenseValue(
   if (skill.ExecutionContext->CounteredSkill) {
     // If countering, modify the offensive value with the offense value
     // of the original skill used, min for invalid dependency type
-    uint16_t counterOff = 0;
+    int32_t counterOff = 0;
     if (skill.ExecutionContext->CounteredSkill->EffectiveDependencyType ==
         SkillDependencyType_t::NONE) {
       counterOff = 1;
@@ -5690,7 +5711,11 @@ uint16_t SkillManager::CalculateOffenseValue(
           target, source, skill.ExecutionContext->CounteredSkill);
     }
 
-    off = (uint16_t)(off + (counterOff * 2));
+    off = (int32_t)(off + (counterOff * 2));
+  }
+
+  if (off < 0) {
+    off = 0;
   }
 
   offenseValues[target->GetEntityID()] = off;
@@ -7527,7 +7552,8 @@ void SkillManager::UpdatePvPStats(
     if (target.EntityState != pSkill->EffectiveSource &&
         (target.Damage1Type == DAMAGE_TYPE_GENERIC ||
          target.Damage2Type == DAMAGE_TYPE_GENERIC)) {
-      int32_t damage = target.Damage1 + target.Damage2;
+      int32_t damage =
+          ClampDamage((double)target.Damage1 + (double)target.Damage2);
       if (!firstDamageSet) {
         pvpStats->InsertFirstDamage(sourceID);
         pvpStats->InsertFirstDamageTaken(entityID);
@@ -7544,7 +7570,8 @@ void SkillManager::UpdatePvPStats(
       }
 
       if (damageDealt.find(entityID) != damageDealt.end()) {
-        damageDealt[entityID] += damage;
+        damageDealt[entityID] =
+            ClampDamage((double)damageDealt[entityID] + (double)damage);
       } else {
         damageDealt[entityID] = damage;
       }
@@ -8807,7 +8834,7 @@ bool SkillManager::CalculateDamage(
             GetCalculatedState(source, pSkill, false, target.EntityState);
 
         double maxLB_calc =
-            (30000 +
+            ((double)SVR_CONST.LIMIT_BREAK_CAP +
              floor(tokuseiManager->GetAspectSum(
                  source, TokuseiAspectType::LIMIT_BREAK_MAX, calcState)));
 
@@ -8827,18 +8854,19 @@ bool SkillManager::CalculateDamage(
           target.Damage2 = maxLB;
         }
 
-        if (target.Damage1 > 30000 || target.Damage2 > 30000) {
+        if (target.Damage1 > SVR_CONST.LIMIT_BREAK_CAP ||
+            target.Damage2 > SVR_CONST.LIMIT_BREAK_CAP) {
           target.Flags2 |= FLAG2_INTENSIVE_BREAK;
         } else {
           target.Flags2 |= FLAG2_LIMIT_BREAK;
         }
       } else {
-        if (target.Damage1 > 9999) {
-          target.Damage1 = 9999;
+        if (target.Damage1 > SVR_CONST.DAMAGE_CAP) {
+          target.Damage1 = SVR_CONST.DAMAGE_CAP;
         }
 
-        if (target.Damage2 > 9999) {
-          target.Damage2 = 9999;
+        if (target.Damage2 > SVR_CONST.DAMAGE_CAP) {
+          target.Damage2 = SVR_CONST.DAMAGE_CAP;
         }
 
         if (critLevel == 1) {
@@ -8883,8 +8911,8 @@ bool SkillManager::CalculateDamage(
 
               // Damage is always dealt at this point even with full
               // resistance, floor at 1
-              float calc = (float)target.Damage1 * (1.f + pResist * -1.f);
-              target.PursuitDamage = (int32_t)floor(calc < 1.f ? 1.f : calc);
+              double calc = (double)target.Damage1 * (1.0 + pResist * -1.0);
+              target.PursuitDamage = ClampDamage(floor(calc < 1.0 ? 1.0 : calc));
             }
           } else {
             // Pursuit damage is a straight adjustment from normal damage
@@ -8899,8 +8927,8 @@ bool SkillManager::CalculateDamage(
             }
 
             // Apply the rate adjustment
-            target.PursuitDamage = (int32_t)floor((double)target.PursuitDamage *
-                                                  pursuitPow * 0.01);
+            target.PursuitDamage = ClampDamage(
+                floor((double)target.PursuitDamage * pursuitPow * 0.01));
 
             // Adjust for 100% limit
             if (target.PursuitDamage > target.Damage1) {
@@ -8921,15 +8949,7 @@ bool SkillManager::CalculateDamage(
               floor((double)target.Damage1 * techPow * 0.01);
 
           // Prevent overflow
-          if (techAttack_calc > (double)std::numeric_limits<int32_t>::max()) {
-            target.TechnicalDamage = std::numeric_limits<int32_t>::max();
-          } else {
-            target.TechnicalDamage = (int32_t)techAttack_calc;
-          }
-
-          // Calculate relative damage
-          target.TechnicalDamage =
-              (int32_t)floor((double)target.Damage1 * techPow * 0.01);
+          target.TechnicalDamage = ClampDamage(techAttack_calc);
 
           // Damage is supposed to hit, floor at 1
           if (!target.TechnicalDamage) {
@@ -8940,7 +8960,7 @@ bool SkillManager::CalculateDamage(
           if (critLevel == 2) {
             // Cap at LB limit
             double maxLB_calc =
-                (30000 +
+                ((double)SVR_CONST.LIMIT_BREAK_CAP +
                  floor(tokuseiManager->GetAspectSum(
                      source, TokuseiAspectType::LIMIT_BREAK_MAX, calcState)));
 
@@ -8955,8 +8975,8 @@ bool SkillManager::CalculateDamage(
             if (target.TechnicalDamage > maxLB) {
               target.TechnicalDamage = maxLB;
             }
-          } else if (target.TechnicalDamage > 9999) {
-            target.TechnicalDamage = 9999;
+          } else if (target.TechnicalDamage > SVR_CONST.DAMAGE_CAP) {
+            target.TechnicalDamage = SVR_CONST.DAMAGE_CAP;
           }
         }
       }
@@ -9106,7 +9126,7 @@ int32_t SkillManager::CalculateDamage_Normal(
     auto tokuseiManager = mServer.lock()->GetTokuseiManager();
 
     // Get the offense value and boost
-    uint16_t off = 0;
+    int32_t off = 0;
     float boost = 0.f;
     if (skill.FusionDemons.size() > 0) {
       // Combine offense value and boost from fusion demons
@@ -9129,12 +9149,7 @@ int32_t SkillManager::CalculateDamage_Normal(
         }
       }
 
-      if (combinedVal > (int32_t)std::numeric_limits<uint16_t>::max()) {
-        // Prevent overflow
-        off = std::numeric_limits<uint16_t>::max();
-      } else {
-        off = (uint16_t)combinedVal;
-      }
+      off = combinedVal;
     } else {
       // Offense value and boost come from normal source
       off = CalculateOffenseValue(source, target.EntityState, pSkill);
@@ -9155,26 +9170,26 @@ int32_t SkillManager::CalculateDamage_Normal(
       boost = -1.f;
     }
 
-    uint16_t def = 0;
+    int32_t def = 0;
     switch (skill.EffectiveDependencyType) {
       case SkillDependencyType_t::CLSR:
       case SkillDependencyType_t::CLSR_LNGR_SPELL:
       case SkillDependencyType_t::CLSR_SPELL:
-        def = (uint16_t)targetState->GetCorrectTbl((size_t)CorrectTbl::PDEF);
+        def = (int32_t)targetState->GetCorrectTbl((size_t)CorrectTbl::PDEF);
         break;
       case SkillDependencyType_t::LNGR:
       case SkillDependencyType_t::LNGR_CLSR_SPELL:
       case SkillDependencyType_t::LNGR_SPELL:
-        def = (uint16_t)targetState->GetCorrectTbl((size_t)CorrectTbl::PDEF);
+        def = (int32_t)targetState->GetCorrectTbl((size_t)CorrectTbl::PDEF);
         break;
       case SkillDependencyType_t::SPELL:
       case SkillDependencyType_t::SPELL_CLSR:
       case SkillDependencyType_t::SPELL_CLSR_LNGR:
       case SkillDependencyType_t::SPELL_LNGR:
-        def = (uint16_t)targetState->GetCorrectTbl((size_t)CorrectTbl::MDEF);
+        def = (int32_t)targetState->GetCorrectTbl((size_t)CorrectTbl::MDEF);
         break;
       case SkillDependencyType_t::SUPPORT:
-        def = (uint16_t)targetState->GetCorrectTbl((size_t)CorrectTbl::MDEF);
+        def = (int32_t)targetState->GetCorrectTbl((size_t)CorrectTbl::MDEF);
         break;
       case SkillDependencyType_t::NONE:
       default:
@@ -9186,7 +9201,10 @@ int32_t SkillManager::CalculateDamage_Normal(
       def = 0;
     }
 
-    def = (uint16_t)(def + target.GuardModifier);
+    def = def + (int32_t)target.GuardModifier;
+    if (def < 0) {
+      def = 0;
+    }
 
     float scale = 0.f;
     switch (critLevel) {
@@ -9234,13 +9252,8 @@ int32_t SkillManager::CalculateDamage_Normal(
       calc = calc * (1.f + boost);
 
       // Floor and adjust rates, and prevent overflow
-      if (calc > (float)std::numeric_limits<int32_t>::max()) {
-        amount = AdjustDamageRates(std::numeric_limits<int32_t>::max(), source,
-                                   target.EntityState, pSkill, isHeal, true);
-      } else {
-        amount = AdjustDamageRates((int32_t)floor(calc), source,
-                                   target.EntityState, pSkill, isHeal, true);
-      }
+      amount = AdjustDamageRates(ClampDamage(floor((double)calc)), source,
+                                 target.EntityState, pSkill, isHeal, true);
     }
 
     if (amount < 1) {
@@ -9271,7 +9284,7 @@ int32_t SkillManager::CalculateDamage_Percent(uint16_t mod, uint8_t& damageType,
   int32_t amount = 0;
 
   if (mod != 0) {
-    amount = (int32_t)ceil((float)current * ((float)mod * 0.01f));
+    amount = ClampDamage(ceil((double)current * ((double)mod * 0.01)));
     damageType = DAMAGE_TYPE_GENERIC;
   }
 
@@ -9284,7 +9297,7 @@ int32_t SkillManager::CalculateDamage_MaxPercent(uint16_t mod,
   int32_t amount = 0;
 
   if (mod != 0) {
-    amount = (int32_t)ceil((float)max * ((float)mod * 0.01f));
+    amount = ClampDamage(ceil((double)max * ((double)mod * 0.01)));
     damageType = DAMAGE_TYPE_GENERIC;
   }
 
@@ -9432,11 +9445,9 @@ int32_t SkillManager::AdjustDamageRates(
   // Apply floor and enforce maximum.
   if (calc < 0.f) {
     calc = 0.f;
-  } else if (calc > (float)std::numeric_limits<int32_t>::max()) {
-    return std::numeric_limits<int32_t>::max();
   }
 
-  return (int32_t)floor(calc);
+  return ClampDamage(floor((double)calc));
 }
 
 SkillTargetResult* SkillManager::GetSelfTarget(

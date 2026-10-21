@@ -590,7 +590,7 @@ class SkillManager {
    * @param pSkill Pointer to the current skill processing state
    * @return Calculated offsense value of the skill
    */
-  uint16_t CalculateOffenseValue(
+  int32_t CalculateOffenseValue(
       const std::shared_ptr<ActiveEntityState>& source,
       const std::shared_ptr<ActiveEntityState>& target,
       const std::shared_ptr<channel::ProcessingSkill>& pSkill);
