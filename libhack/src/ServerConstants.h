@@ -470,6 +470,11 @@ class ServerConstants {
     /// there automatically (1 = on, 0 = off). Optional, defaults to off.
     uint8_t AUTO_MATERIAL_TANK;
 
+    /// Max HP and max MP limit of player characters and partner demons. HP
+    /// is sent to the client as a 16-bit value, so 1 to 32767. Optional,
+    /// defaults to 30000.
+    int32_t PLAYER_HP_MP_MAX;
+
     /// Maximum number of demon force items consumed by one use (0 = off,
     /// the client only ever uses one). Optional, defaults to off.
     uint16_t DEMON_FORCE_BULK;

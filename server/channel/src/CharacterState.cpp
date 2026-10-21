@@ -88,6 +88,20 @@
 
 using namespace channel;
 
+namespace {
+// Digitalize values are stored as 16-bit values: stop at the 16-bit limits
+// instead of wrapping (a demon above 32767 HP gave the character 1 max HP)
+int16_t ToDigitalizeValue(double value) {
+  if (value >= 32767.0) {
+    return 32767;
+  } else if (value <= -32768.0) {
+    return -32768;
+  }
+
+  return (int16_t)value;
+}
+}  // namespace
+
 namespace libcomp {
 template <>
 BaseScriptEngine& BaseScriptEngine::Using<CharacterState>() {
@@ -315,23 +329,24 @@ std::shared_ptr<objects::DigitalizeState> CharacterState::Digitalize(
   for (uint8_t i = (size_t)CorrectTbl::STR; i <= (uint8_t)CorrectTbl::MP_MAX;
        i++) {
     mDigitalizeState->SetCorrectValues(
-        i,
-        (int16_t)((double)statRate * 0.01 * (double)demonStats[(CorrectTbl)i]));
+        i, ToDigitalizeValue((double)statRate * 0.01 *
+                             (double)demonStats[(CorrectTbl)i]));
   }
 
   // Add non-calculated derived stats
   for (uint8_t i = (size_t)CorrectTbl::CLSR; i <= (uint8_t)CorrectTbl::SUPPORT;
        i++) {
     mDigitalizeState->SetCorrectValues(
-        i,
-        (int16_t)((double)statRate * 0.01 * (double)demonStats[(CorrectTbl)i]));
+        i, ToDigitalizeValue((double)statRate * 0.01 *
+                             (double)demonStats[(CorrectTbl)i]));
   }
 
   if (affinities) {
     // Add affinities
     for (uint8_t i = (size_t)CorrectTbl::RES_DEFAULT;
          i <= (uint8_t)CorrectTbl::NRA_MAGIC; i++) {
-      mDigitalizeState->SetCorrectValues(i, (int16_t)demonStats[(CorrectTbl)i]);
+      mDigitalizeState->SetCorrectValues(
+          i, ToDigitalizeValue((double)demonStats[(CorrectTbl)i]));
     }
   }
 
@@ -360,9 +375,11 @@ std::shared_ptr<objects::DigitalizeState> CharacterState::Digitalize(
                   type != (uint8_t)CorrectTbl::RATE_HEAL_TAKEN &&
                   type != (uint8_t)CorrectTbl::BOOST_HEAL && val) {
                 mDigitalizeState->SetCorrectValues(
-                    (uint8_t)type, (int16_t)(mDigitalizeState->GetCorrectValues(
-                                                 (uint8_t)type) +
-                                             val));
+                    (uint8_t)type,
+                    ToDigitalizeValue(
+                        (double)mDigitalizeState->GetCorrectValues(
+                            (uint8_t)type) +
+                        (double)val));
               }
 
               i += 2;
@@ -937,7 +954,7 @@ uint8_t CharacterState::RecalculateStats(
       if (pair.first != (uint8_t)CorrectTbl::HP_MAX &&
           pair.first != (uint8_t)CorrectTbl::MP_MAX) {
         stats[(CorrectTbl)pair.first] =
-            (int16_t)(stats[(CorrectTbl)pair.first] + pair.second);
+            stats[(CorrectTbl)pair.first] + pair.second;
       }
     }
   }
@@ -980,11 +997,11 @@ uint8_t CharacterState::RecalculateStats(
   if (dgState) {
     // Add digitalize HP/MP now
     stats[CorrectTbl::HP_MAX] =
-        (int16_t)(stats[CorrectTbl::HP_MAX] +
-                  dgState->GetCorrectValues((uint8_t)CorrectTbl::HP_MAX));
+        stats[CorrectTbl::HP_MAX] +
+        dgState->GetCorrectValues((uint8_t)CorrectTbl::HP_MAX);
     stats[CorrectTbl::MP_MAX] =
-        (int16_t)(stats[CorrectTbl::MP_MAX] +
-                  dgState->GetCorrectValues((uint8_t)CorrectTbl::MP_MAX));
+        stats[CorrectTbl::MP_MAX] +
+        dgState->GetCorrectValues((uint8_t)CorrectTbl::MP_MAX);
   }
 
   if (selfState) {

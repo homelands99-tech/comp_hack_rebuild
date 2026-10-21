@@ -9153,8 +9153,6 @@ void CharacterManager::AdjustStatBounds(
       {CorrectTbl::LUCK, 0}};
 
   static libcomp::EnumMap<CorrectTbl, int16_t> maxStats = {
-      {CorrectTbl::HP_MAX, MAX_PLAYER_HP_MP},
-      {CorrectTbl::MP_MAX, MAX_PLAYER_HP_MP},
       {CorrectTbl::STR, 999},
       {CorrectTbl::MAGIC, 999},
       {CorrectTbl::VIT, 999},
@@ -9186,6 +9184,14 @@ void CharacterManager::AdjustStatBounds(
       auto it = stats.find(pair.first);
       if (it != stats.end() && it->second > (int32_t)pair.second) {
         stats[pair.first] = pair.second;
+      }
+    }
+
+    // Max HP/MP of players and partner demons (PLAYER_HP_MP_MAX)
+    for (CorrectTbl tblID : {CorrectTbl::HP_MAX, CorrectTbl::MP_MAX}) {
+      auto it = stats.find(tblID);
+      if (it != stats.end() && it->second > SVR_CONST.PLAYER_HP_MP_MAX) {
+        stats[tblID] = SVR_CONST.PLAYER_HP_MP_MAX;
       }
     }
   }
