@@ -335,6 +335,14 @@ bool ServerConstants::Initialize(const String& filePath) {
         LoadInteger(constants["GACHA_ENABLED"], sConstants.GACHA_ENABLED);
   }
 
+  // Optional: allow players and partner demons to move while using SPIN and
+  // RAPID action type skills.
+  sConstants.SPIN_RAPID_MOVE = 0;
+  if (constants.find("SPIN_RAPID_MOVE") != constants.end()) {
+    success &= LoadInteger(constants["SPIN_RAPID_MOVE"],
+                           sConstants.SPIN_RAPID_MOVE);
+  }
+
   // Optional: bulk reunion cost per rank (0 = off).
   sConstants.REUNION_BULK_COST = 0;
   if (constants.find("REUNION_BULK_COST") != constants.end()) {

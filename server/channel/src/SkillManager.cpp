@@ -1849,38 +1849,73 @@ bool SkillManager::SkillHasMoreUses(
          activated->GetExecuteCount() < activated->GetMaxUseCount();
 }
 
+/**
+ * Check if the source can move while using a SPIN or RAPID action type skill
+ * because of the SPIN_RAPID_MOVE constant. Only player characters and their
+ * partner demons are affected. The skill action type itself is not changed.
+ * @param source Entity using the skill
+ * @param skillData Definition of the skill being used
+ * @return true if the movement restriction of the skill is lifted
+ */
+static bool CanMoveWhileUsingSkill(
+    const std::shared_ptr<ActiveEntityState>& source,
+    const std::shared_ptr<objects::MiSkillData>& skillData) {
+  if (!SVR_CONST.SPIN_RAPID_MOVE) {
+    return false;
+  }
+
+  auto entityType = source->GetEntityType();
+  if (entityType != EntityType_t::CHARACTER &&
+      entityType != EntityType_t::PARTNER_DEMON) {
+    return false;
+  }
+
+  switch (skillData->GetBasic()->GetActionType()) {
+    case objects::MiSkillBasicData::ActionType_t::SPIN:
+    case objects::MiSkillBasicData::ActionType_t::RAPID:
+      return true;
+    default:
+      return false;
+  }
+}
+
 std::pair<float, float> SkillManager::GetMovementSpeeds(
     const std::shared_ptr<ActiveEntityState>& source,
     const std::shared_ptr<objects::MiSkillData>& skillData) {
   float chargeSpeed = 0.f, chargeCompleteSpeed = 0.f;
 
-  // Send movement speed based off skill action type
-  switch (skillData->GetBasic()->GetActionType()) {
-    case objects::MiSkillBasicData::ActionType_t::SPIN:
-    case objects::MiSkillBasicData::ActionType_t::RAPID:
-    case objects::MiSkillBasicData::ActionType_t::COUNTER:
-    case objects::MiSkillBasicData::ActionType_t::DODGE:
-      // No movement during or after
-      break;
-    case objects::MiSkillBasicData::ActionType_t::SHOT:
-    case objects::MiSkillBasicData::ActionType_t::TALK:
-    case objects::MiSkillBasicData::ActionType_t::INTIMIDATE:
-    case objects::MiSkillBasicData::ActionType_t::TAUNT:
-    case objects::MiSkillBasicData::ActionType_t::SUPPORT:
-      // Move after only
-      chargeCompleteSpeed = source->GetMovementSpeed(true);
-      break;
-    case objects::MiSkillBasicData::ActionType_t::GUARD:
-      // Move during and after charge (1/2 normal speed)
-      chargeSpeed = chargeCompleteSpeed =
-          (source->GetMovementSpeed(true) * 0.5f);
-      break;
-    case objects::MiSkillBasicData::ActionType_t::ATTACK:
-    case objects::MiSkillBasicData::ActionType_t::RUSH:
-    default:
-      // Move during and after charge (normal speed)
-      chargeSpeed = chargeCompleteSpeed = source->GetMovementSpeed(true);
-      break;
+  if (CanMoveWhileUsingSkill(source, skillData)) {
+    // SPIN_RAPID_MOVE: move during and after charge (normal speed)
+    chargeSpeed = chargeCompleteSpeed = source->GetMovementSpeed(true);
+  } else {
+    // Send movement speed based off skill action type
+    switch (skillData->GetBasic()->GetActionType()) {
+      case objects::MiSkillBasicData::ActionType_t::SPIN:
+      case objects::MiSkillBasicData::ActionType_t::RAPID:
+      case objects::MiSkillBasicData::ActionType_t::COUNTER:
+      case objects::MiSkillBasicData::ActionType_t::DODGE:
+        // No movement during or after
+        break;
+      case objects::MiSkillBasicData::ActionType_t::SHOT:
+      case objects::MiSkillBasicData::ActionType_t::TALK:
+      case objects::MiSkillBasicData::ActionType_t::INTIMIDATE:
+      case objects::MiSkillBasicData::ActionType_t::TAUNT:
+      case objects::MiSkillBasicData::ActionType_t::SUPPORT:
+        // Move after only
+        chargeCompleteSpeed = source->GetMovementSpeed(true);
+        break;
+      case objects::MiSkillBasicData::ActionType_t::GUARD:
+        // Move during and after charge (1/2 normal speed)
+        chargeSpeed = chargeCompleteSpeed =
+            (source->GetMovementSpeed(true) * 0.5f);
+        break;
+      case objects::MiSkillBasicData::ActionType_t::ATTACK:
+      case objects::MiSkillBasicData::ActionType_t::RUSH:
+      default:
+        // Move during and after charge (normal speed)
+        chargeSpeed = chargeCompleteSpeed = source->GetMovementSpeed(true);
+        break;
+    }
   }
 
   if (skillData->GetDamage()->GetFunctionID() == SVR_CONST.SKILL_REST) {
@@ -9964,7 +9999,10 @@ bool SkillManager::SetSkillCompleteState(
 
     uint64_t lockOutTime = currentTime + (uint64_t)(stiffness * 1000);
     if (stiffness) {
-      if (source->IsMoving()) {
+      // Do not stop a moving entity in place if it can move while using
+      // the skill (SPIN_RAPID_MOVE)
+      if (source->IsMoving() &&
+          !CanMoveWhileUsingSkill(source, pSkill->Definition)) {
         mServer.lock()->GetZoneManager()->FixCurrentPosition(
             source, lockOutTime, currentTime);
       }
