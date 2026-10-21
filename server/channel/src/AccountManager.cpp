@@ -821,6 +821,74 @@ bool AccountManager::InitializeCharacter(
     return false;
   }
 
+  // @bag page boxes (inventory boxes 1 and up) that the character refers to
+  // but that are not in the database: older versions could save the
+  // references without the boxes and the character could not log in. Make
+  // them again (empty, same UUID); items still saved in them are recovered
+  // into them below like any other orphaned item.
+  {
+    std::set<int64_t> usedPages;
+    std::list<size_t> missing;
+    for (size_t i = 1; i < CharacterManager::INVENTORY_PAGE_COUNT; i++) {
+      auto ref = character->GetItemBoxes(i);
+      if (ref.IsNull()) {
+        continue;
+      }
+
+      auto box = ref.Get(db);
+      if (box) {
+        usedPages.insert(box->GetBoxID());
+      } else {
+        missing.push_back(i);
+      }
+    }
+
+    // Page numbers held by the remade boxes: the free ones, page 1 last so
+    // the visible inventory stays page 1 when every box is remade
+    std::list<int64_t> freePages;
+    for (int64_t page : {2, 3, 4, 5, 1}) {
+      if (page <= (int64_t)CharacterManager::INVENTORY_PAGE_COUNT &&
+          usedPages.find(page) == usedPages.end()) {
+        freePages.push_back(page);
+      }
+    }
+
+    for (size_t i : missing) {
+      auto uuid = character->GetItemBoxes(i).GetUUID();
+      auto box = libcomp::PersistentObject::New<objects::ItemBox>();
+      box->SetType(objects::ItemBox::Type_t::INVENTORY);
+      box->SetBoxID(freePages.empty() ? (int64_t)(i + 1) : freePages.front());
+      if (!freePages.empty()) {
+        freePages.pop_front();
+      }
+      box->SetAccount(character->GetAccount());
+      box->SetCharacter(character->GetUUID());
+
+      if (!libcomp::PersistentObject::Register(box, uuid) || !box->Insert(db)) {
+        LogAccountManagerError([&]() {
+          return libcomp::String(
+                     "Inventory page box %1 is missing and could not be made "
+                     "again for account: %2\n")
+              .Arg(uuid.ToString())
+              .Arg(state->GetAccountUID().ToString());
+        });
+
+        return false;
+      }
+
+      character->SetItemBoxes(i, box);
+
+      LogAccountManagerWarning([&]() {
+        return libcomp::String(
+                   "Inventory page box %1 was missing, made it again (page %2) "
+                   "for account: %3\n")
+            .Arg(uuid.ToString())
+            .Arg(box->GetBoxID())
+            .Arg(state->GetAccountUID().ToString());
+      });
+    }
+  }
+
   // Item boxes and items
   std::list<libcomp::ObjectReference<objects::ItemBox>> allBoxes;
   for (auto itemBox : character->GetItemBoxes()) {
