@@ -5175,6 +5175,12 @@ int32_t CharacterManager::ReunionBulk(
     return -1;
   }
 
+  // Only for a level 99 demon with every group at rank 8 or above
+  auto demonStats = demon->GetCoreStats().Get();
+  if (!demonStats || demonStats->GetLevel() < 99) {
+    return -1;
+  }
+
   for (int8_t rank : demon->GetReunion()) {
     if (rank < 8) {
       return -1;

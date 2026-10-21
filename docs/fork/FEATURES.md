@@ -124,7 +124,7 @@ next stack effect and the force values, and sets the per-use count.*
 
 ### 動作 ###
 
-- 対象: 召喚中の仲魔が御霊化していて、12 系統すべてがランク 8 以上のとき。
+- 対象: 召喚中の仲魔が御霊化していて、レベル 99 で、12 系統すべてがランク 8 以上のとき。
 - 1 ランクごとの費用（まとめて支払い、足りなければ何も変わりません）:
   - マッカ `REUNION_BULK_COST`
   - レベルダウン防止のアイテム 1 個（`REUNION_BULK_KEEP_ITEMS`、初期値はイビルガム【100】の
@@ -143,6 +143,7 @@ next stack effect and the force values, and sets the per-use count.*
 - 条件スクリプト `bool_reunionAllRanks`（`EventScriptCondition`）
   - `value1`: 12 系統すべてがこのランク以上（8、99 など）
   - `value2`: 1 なら御霊化していることも条件にする
+  - 仲魔のレベルは、標準の条件 `PARTNER_LEVEL`（`EventCondition`、`value1` = 99）を同じ分岐に並べます
 - アクションスクリプト `action_reunionBulk`（`ActionRunScript`）
   - `params`: 系統 1〜12（1 テイワズ … 12 ウィアド）、`info`（計算だけ）/ `ask` 数|`max`
     （上げる数を決める）/ `req`（決めた数だけ上げる）/ 数 / `max`
@@ -163,7 +164,7 @@ next stack effect and the force values, and sets the per-use count.*
 - `server/channel/src/CharacterManager.h/.cpp`: `ReunionBulk()`（スクリプトからも呼べる）
 
 *English: `CharacterManager::ReunionBulk` (also bound for scripts) raises one
-reunion group of the summoned mitama demon (all groups at rank 8+) by N ranks
+reunion group of the summoned level 99 mitama demon (all groups at rank 8+) by N ranks
 at once, paying N x `REUNION_BULK_COST` macca, N level keeping items and N rank
 9 material sets, without the level reset. Enable with `REUNION_BULK_COST`.*
 
