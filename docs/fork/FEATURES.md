@@ -301,6 +301,38 @@ COMP の仲魔をもう 1 体、AI で動く味方として連れて歩けます
 `SKILL_SUB_DEMON` skill. Minion types in `data/minions.xml` can be summoned
 with the `SKILL_MINION` skill. Enable with `SUB_DEMON_ENABLED` / `MINION_ENABLED`.*
 
+## スピン・ラピッド中の移動 / Move while using SPIN and RAPID skills ##
+
+スキルの種別が「スピン（SPIN）」「ラピッド（RAPID）」のスキルを、
+動きながら使えるようにします。スキルの種別そのものは変わらないので、
+ダメージ計算・ガードやカウンターの判定・特性の条件などは今までどおりです。
+
+- 対象は、プレイヤーキャラクターとパートナー悪魔だけです。敵や仲間 NPC は変わりません。
+- チャージ中もチャージ後も、通常の移動速度で動けます。
+- 実行した瞬間に、その場に固定されることもありません。
+- 実行後の硬直（次のスキルを使えない時間）は今までどおりです。
+- データベースの構造は変更しません。
+- 動きながら撃てるのは大きな強化です。対人戦（PvP）のバランスに注意してください。
+
+### 設定 ###
+
+```xml
+<constant name="SPIN_RAPID_MOVE">1</constant>
+```
+
+`0` または行が無い場合は無効（今までどおり動けない）です。
+
+### 関係するソース ###
+
+- `libhack/src/ServerConstants.h/.cpp`: `SPIN_RAPID_MOVE`（省略可能）
+- `server/channel/src/SkillManager.cpp`: `CanMoveWhileUsingSkill()`、
+  `GetMovementSpeeds()`（移動速度）、`SetSkillCompleteState()`（位置の固定）
+
+*English: When `SPIN_RAPID_MOVE` = 1 in constants.xml, player characters and
+partner demons can move at normal speed while using SPIN and RAPID action type
+skills and are not fixed in place when the skill executes. The action type is
+unchanged. Enemies and allies are not affected.*
+
 ## 追加機能の文言（custom_messages） / Texts of the added features ##
 
 追加した機能がプレイヤーに出す文言（チャット欄のメッセージ・GM コマンドの表示）は、

@@ -470,6 +470,11 @@ class ServerConstants {
     /// there automatically (1 = on, 0 = off). Optional, defaults to off.
     uint8_t AUTO_MATERIAL_TANK;
 
+    /// If players and their partner demons can move while using SPIN and
+    /// RAPID action type skills (1 = on, 0 = off). The skill action type is
+    /// not changed. Optional, defaults to off.
+    uint8_t SPIN_RAPID_MOVE;
+
     /// Maximum number of demon force items consumed by one use (0 = off,
     /// the client only ever uses one). Optional, defaults to off.
     uint16_t DEMON_FORCE_BULK;
