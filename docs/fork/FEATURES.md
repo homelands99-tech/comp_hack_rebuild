@@ -218,6 +218,9 @@ cap can be raised step by step.*
 - 取引中は切り替えられません。装備と通貨で枠が足りないときは切り替わりません（何も変わりません）。
 - 残りの 4 ページは、キャラクターごとに追加のアイテム箱（`ItemBox`）として保存されます
   （初めて `@bag` を使ったときに作られます。データベースの構造は変更しません）。
+- 前の版の不具合で、ページの箱が保存されずにログインできなくなったキャラクターは、
+  ログインのときに自動で直ります（消えた箱を空で作り直し、その箱に残っていたアイテムは戻ります。
+  サーバーのログに「Inventory page box ... was missing, made it again」と出ます）。
 - 有効なときは一般プレイヤーも使えます。
 
 ### 設定 ###
@@ -233,10 +236,13 @@ cap can be raised step by step.*
 - `libhack/src/ServerConstants.h/.cpp`: `INVENTORY_PAGES`（省略可能）
 - `server/channel/src/CharacterManager.h/.cpp`: `GetInventoryPages()`、`SwitchInventoryPage()`
 - `server/channel/src/ChatManager.h/.cpp`: `@bag`
+- `server/channel/src/AccountManager.cpp`: ログインのときに消えたページの箱を作り直す
 
 *English: With `INVENTORY_PAGES` = 1, `@bag [1-5]` switches the visible
 inventory between 5 pages stored as extra item boxes; equipped items and
-currency stay visible on every page. Open to players while enabled.*
+currency stay visible on every page. Open to players while enabled.
+Characters that older versions left unable to log in (page box references
+saved without the boxes) are repaired at login.*
 
 ## 転生ポイントの GM コマンド（@rpoint） / Reunion points GM command ##
 

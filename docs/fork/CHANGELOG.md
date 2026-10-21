@@ -7,6 +7,7 @@
 - サブ召喚を追加: COMP の仲魔をもう 1 体 AI の味方として連れて歩く 2 体目（`SUB_DEMON_ENABLED`・`SKILL_SUB_DEMON`）と、アイテム・スキルで呼ぶミニオン（`MINION_ENABLED`・`SKILL_MINION`・`data/minions.xml`）。どちらも既定は無効
 - GM コマンド `@sub`・`@minion` を追加
 - データベース: `Character` に `SubDemon`・`SubDemonAuto` の列（world の起動時に自動で足される）
+- 修正: 前の版の `@bag` の不具合でログインできなくなったキャラクターを、ログインのときに自動で直す（消えたページの箱を作り直す）
 
 ## 2026-10-06 ##
 
