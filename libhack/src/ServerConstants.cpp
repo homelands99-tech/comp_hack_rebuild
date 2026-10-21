@@ -335,6 +335,26 @@ bool ServerConstants::Initialize(const String& filePath) {
         LoadInteger(constants["GACHA_ENABLED"], sConstants.GACHA_ENABLED);
   }
 
+  // Optional: damage limits (defaults are the original fixed values).
+  sConstants.DAMAGE_CAP = 9999;
+  if (constants.find("DAMAGE_CAP") != constants.end()) {
+    success &= LoadInteger(constants["DAMAGE_CAP"], sConstants.DAMAGE_CAP);
+    if (sConstants.DAMAGE_CAP < 1) {
+      LogServerConstantsErrorMsg("DAMAGE_CAP must be 1 or more\n");
+      success = false;
+    }
+  }
+
+  sConstants.LIMIT_BREAK_CAP = 30000;
+  if (constants.find("LIMIT_BREAK_CAP") != constants.end()) {
+    success &= LoadInteger(constants["LIMIT_BREAK_CAP"],
+                           sConstants.LIMIT_BREAK_CAP);
+    if (sConstants.LIMIT_BREAK_CAP < 1) {
+      LogServerConstantsErrorMsg("LIMIT_BREAK_CAP must be 1 or more\n");
+      success = false;
+    }
+  }
+
   // Optional: bulk reunion cost per rank (0 = off).
   sConstants.REUNION_BULK_COST = 0;
   if (constants.find("REUNION_BULK_COST") != constants.end()) {

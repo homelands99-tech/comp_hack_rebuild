@@ -325,3 +325,36 @@ with the `SKILL_MINION` skill. Enable with `SUB_DEMON_ENABLED` / `MINION_ENABLED
 *English: Texts shown to players by the added features can be overridden in
 `data/custom_messages.xml` (CustomMessage ID / Text). Without an entry the
 default from the source is used.*
+
+## ダメージの上限とあふれ防止 / Damage limits and overflow ##
+
+### 上限の設定 ###
+
+```xml
+<constant name="DAMAGE_CAP">9999</constant>
+<constant name="LIMIT_BREAK_CAP">30000</constant>
+```
+
+- `DAMAGE_CAP`: 通常・クリティカルの 1 回のダメージの上限（テクニカルアタックも同じ）。
+- `LIMIT_BREAK_CAP`: リミットブレイクの上限。特性の「LB 上限アップ」（`LIMIT_BREAK_MAX`）の合計がこれに足されます。
+  これを超えたダメージはインテンシブブレイクの表示になります。
+- どちらも 1〜2147483647。行が無いときは元の値（9999・30000）です。
+
+### あふれ防止（設定なしで常に） ###
+
+ダメージ・回復・吸収の値はサーバーとクライアントの間で 32 ビットの数（最大 2,147,483,647）として
+扱われます。これを超える計算になっても、桁があふれてマイナスや小さな値にならず、2,147,483,647 で止まります
+（テクニカルアタック・追撃・通常ダメージの合計、吸収、HP の回復を含む）。
+また、攻撃力（物理・射撃・魔法の合計など）と防御力は 65,535 であふれていたのを、大きな数で計算するようにしました。
+能力値そのものの上限（32,767）は変わりません。
+
+### 関係するソース ###
+
+- `libhack/src/ServerConstants.h/.cpp`: `DAMAGE_CAP`、`LIMIT_BREAK_CAP`（省略可能）
+- `server/channel/src/SkillManager.h/.cpp`: `CalculateDamage()`、`CalculateOffenseValue()`、あふれ防止
+- `server/channel/src/ActiveEntityState.cpp`: `SetHPMP()`（大きな回復であふれない）
+
+*English: `DAMAGE_CAP` (default 9999) and `LIMIT_BREAK_CAP` (default 30000)
+set the damage limits. Damage, heal and drain amounts stop at the 32-bit
+limit instead of overflowing, and offense/defense values are no longer
+limited to 16 bits.*

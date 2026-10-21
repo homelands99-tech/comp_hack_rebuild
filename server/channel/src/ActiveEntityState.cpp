@@ -679,8 +679,10 @@ bool ActiveEntityState::SetHPMP(int32_t hp, int32_t mp, bool adjust,
   int32_t startingHP = cs->GetHP();
   int32_t startingMP = cs->GetMP();
   if (adjust) {
-    hp = (int32_t)(startingHP + hp);
-    mp = (int32_t)(startingMP + mp);
+    hp = (int32_t)std::min<int64_t>((int64_t)startingHP + hp,
+                                    std::numeric_limits<int32_t>::max());
+    mp = (int32_t)std::min<int64_t>((int64_t)startingMP + mp,
+                                    std::numeric_limits<int32_t>::max());
 
     if (!canOverflow) {
       // If the adjusted damage cannot overflow

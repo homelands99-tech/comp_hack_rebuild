@@ -482,6 +482,15 @@ class ServerConstants {
     /// (1 = on, 0 = off). Optional, defaults to off.
     uint8_t GACHA_ENABLED;
 
+    /// Damage limit of a normal or critical hit (and its tech attack).
+    /// Optional, defaults to 9999 (1 to 2147483647).
+    int32_t DAMAGE_CAP;
+
+    /// Damage limit of a limit break before the LIMIT_BREAK_MAX tokusei are
+    /// added (higher damage shows as an intensive break). Optional, defaults
+    /// to 30000 (1 to 2147483647).
+    int32_t LIMIT_BREAK_CAP;
+
     /// Macca paid per rank by the bulk reunion (CharacterManager::ReunionBulk,
     /// used by events). 0 = off. Optional, defaults to off.
     uint32_t REUNION_BULK_COST;
