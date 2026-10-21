@@ -1423,6 +1423,28 @@ class SkillManager {
             const std::shared_ptr<ChannelClientConnection>& client);
 
   /**
+   * Bring out or return the registered second demon (SKILL_SUB_DEMON).
+   * @param activated Pointer to the activated ability instance
+   * @param ctx Special execution state for the skill
+   * @param client Pointer to the client connection that activated the skill,
+   *  this will always fail if it is null
+   */
+  bool SubDemon(const std::shared_ptr<objects::ActivatedAbility>& activated,
+                const std::shared_ptr<SkillExecutionContext>& ctx,
+                const std::shared_ptr<ChannelClientConnection>& client);
+
+  /**
+   * Summon or return a minion (SKILL_MINION, special param 1 = type ID).
+   * @param activated Pointer to the activated ability instance
+   * @param ctx Special execution state for the skill
+   * @param client Pointer to the client connection that activated the skill,
+   *  this will always fail if it is null
+   */
+  bool Minion(const std::shared_ptr<objects::ActivatedAbility>& activated,
+              const std::shared_ptr<SkillExecutionContext>& ctx,
+              const std::shared_ptr<ChannelClientConnection>& client);
+
+  /**
    * Run applicable script validations for an executing or activating skill
    * and stop execution if they do not pass.
    * @param pSkill Current skill processing state

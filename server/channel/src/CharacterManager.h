@@ -291,6 +291,151 @@ class CharacterManager {
   void SendAutoRecovery(const std::shared_ptr<ChannelClientConnection>& client);
 
   /**
+   * Bring out a second demon from the COMP as an AI controlled
+   * ally that follows the character and fights on its own. It copies the
+   * demon's level and base stats. Only one second demon at a time; it is
+   * removed when the character leaves the zone or summons that demon.
+   * @param client Pointer to the client connection
+   * @param slot COMP slot of the demon (0 based)
+   * @param error Output message when it fails
+   * @return true if the ally was created
+   */
+  bool SummonSubDemon(
+      const std::shared_ptr<channel::ChannelClientConnection>& client,
+      size_t slot, libcomp::String& error);
+
+  /**
+   * Register the character's summoned demon as its second demon (or clear
+   * the registration). Used by the event script action_subdemon.
+   * @param cState Character state
+   * @param mode 0 = register the summoned demon, 1 = clear, 2 = only
+   *  report the state, 3 = auto summon on, 4 = auto summon off, 5 = report
+   *  the auto summon setting
+   * @return 1 registered (or cleared / auto on), 0 nothing registered (mode 2
+   *  / no change / auto off), -1 the feature is off, -2 no demon is
+   *  summoned, -3 error
+   */
+  int8_t RegisterSubDemon(const std::shared_ptr<CharacterState>& cState,
+                          int8_t mode);
+
+  /**
+   * Bring out the registered second demon, or return it if it is out.
+   * Used by the SKILL_SUB_DEMON skill.
+   * @param client Pointer to the client connection
+   * @param message Output message for the player
+   * @return true if something was done
+   */
+  bool ToggleSubDemon(
+      const std::shared_ptr<channel::ChannelClientConnection>& client,
+      libcomp::String& message);
+
+  /**
+   * Bring out the registered second demon if the character turned on auto
+   * summon and a partner demon is out (after summoning it, entering a zone).
+   * @param client Pointer to the client connection
+   */
+  void AutoSummonSubDemon(
+      const std::shared_ptr<channel::ChannelClientConnection>& client);
+
+  /**
+   * Return the second demon if its demon is no longer in the COMP (moved to
+   * a depot, deleted).
+   * @param client Pointer to the client connection
+   */
+  void CheckSubDemonInCOMP(
+      const std::shared_ptr<channel::ChannelClientConnection>& client);
+
+  /**
+   * Remove the client's second demon (see SummonSubDemon) if it exists.
+   * @param client Pointer to the client connection
+   * @return true if one was removed
+   */
+  bool DismissSubDemon(
+      const std::shared_ptr<channel::ChannelClientConnection>& client,
+      int32_t onlyEntityID = 0);
+
+  /**
+   * Called when the client's second demon dies: the COMP demon gets HP 0
+   * right away (the ally entity may be removed before it is dismissed).
+   * @param client Pointer to the client connection
+   * @param entityID Entity ID of the second demon that died
+   */
+  void MarkSubDemonDead(
+      const std::shared_ptr<channel::ChannelClientConnection>& client,
+      int32_t entityID);
+
+  /**
+   * Give experience to the COMP demon used as the client's second demon
+   * (only when ClientState SubDemonXP is on).
+   * @param client Pointer to the client connection
+   * @param xp Experience to add
+   */
+  void GrantSubDemonXP(
+      const std::shared_ptr<channel::ChannelClientConnection>& client,
+      int64_t xp);
+
+  /**
+   * Summon a minion of a type in data/minions.xml (MINION_ENABLED) next to
+   * the character, or return it if that type is already out.
+   * @param client Pointer to the client connection
+   * @param minionID Minion type ID
+   * @param message Output message for the player
+   * @return true if a minion was summoned or returned
+   */
+  bool SummonMinion(
+      const std::shared_ptr<channel::ChannelClientConnection>& client,
+      uint32_t minionID, libcomp::String& message);
+
+  /**
+   * Remove the client's minion if it exists.
+   * @param client Pointer to the client connection
+   * @param onlyEntityID If not 0, only remove the minion with this entity ID
+   * @return true if a minion was removed
+   */
+  bool DismissMinion(
+      const std::shared_ptr<channel::ChannelClientConnection>& client,
+      int32_t onlyEntityID = 0);
+
+  /**
+   * Note that the client's minion was killed (death cooldown).
+   * @param client Pointer to the client connection
+   * @param entityID Entity ID of the killed ally
+   */
+  void MinionDied(
+      const std::shared_ptr<channel::ChannelClientConnection>& client,
+      int32_t entityID);
+
+  /**
+   * Check if summoning the minion type with an item should use up the item
+   * (the type allows it and the minion would really be summoned now).
+   * @param client Pointer to the client connection
+   * @param minionID Minion type ID
+   * @return true if the item is used up
+   */
+  bool MinionConsumesItem(
+      const std::shared_ptr<channel::ChannelClientConnection>& client,
+      uint32_t minionID);
+
+  /**
+   * Put the statuses of an aura minion on the character and partner demon
+   * again (scheduled while the minion is out).
+   * @param client Pointer to the client connection
+   * @param entityID Entity ID of the minion
+   */
+  void MinionAura(
+      const std::shared_ptr<channel::ChannelClientConnection>& client,
+      int32_t entityID);
+
+  /**
+   * Return the minion when its time is up.
+   * @param client Pointer to the client connection
+   * @param entityID Entity ID of the minion
+   */
+  void MinionTimeUp(
+      const std::shared_ptr<channel::ChannelClientConnection>& client,
+      int32_t entityID);
+
+  /**
    * Summon the demon matching the supplied ID on the client's character.
    * @param client Pointer to the client connection containing
    *  the character

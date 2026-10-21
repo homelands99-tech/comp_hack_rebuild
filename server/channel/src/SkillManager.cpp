@@ -138,6 +138,7 @@
 #include "ActionManager.h"
 #include "ChannelServer.h"
 #include "CharacterManager.h"
+#include "AIState.h"
 #include "ChatManager.h"
 #include "EventManager.h"
 #include "ManagerConnection.h"
@@ -375,6 +376,12 @@ SkillManager::SkillManager(const std::weak_ptr<ChannelServer>& server)
       &SkillManager::Traesto;
   mSkillFunctions[SVR_CONST.SKILL_XP_PARTNER] = &SkillManager::XPUp;
   mSkillFunctions[SVR_CONST.SKILL_XP_SELF] = &SkillManager::XPUp;
+  if (SVR_CONST.SKILL_SUB_DEMON) {
+    mSkillFunctions[SVR_CONST.SKILL_SUB_DEMON] = &SkillManager::SubDemon;
+  }
+  if (SVR_CONST.SKILL_MINION) {
+    mSkillFunctions[SVR_CONST.SKILL_MINION] = &SkillManager::Minion;
+  }
 
   // Map skills that will send a follow up packet after processing
   mSkillFunctions[SVR_CONST.SKILL_CLAN_FORM] = &SkillManager::SpecialSkill;
@@ -1653,8 +1660,16 @@ int8_t SkillManager::ValidateSkillTarget(
             // accepted revival from others, or if it is a partner demon outside
             // of demon-only instances and it has been dead for less than the
             // revival lockout timer.
+            // A player's second demon (companion ally) may always revive its
+            // owner, like the player's own demon
+            bool companionOwner =
+                source->GetEntityType() == EntityType_t::ALLY &&
+                source->GetAIState() && source->GetAIState()->GetCompanion() &&
+                source->GetAIState()->GetFollowEntityID() ==
+                    target->GetEntityID();
+
             targetInvalid =
-                !targetClientState->GetAcceptRevival() &&
+                !companionOwner && !targetClientState->GetAcceptRevival() &&
                 (targetClientState->GetCharacterState() == target ||
                  (targetClientState->GetDemonState() == target &&
                   zone->GetInstanceType() == InstanceType_t::DEMON_ONLY));
@@ -2660,7 +2675,15 @@ bool SkillManager::DetermineCosts(
     }
   }
 
-  if (pSkill->ItemID > 0) {
+  // A minion type may keep the item (or nothing is summoned right now)
+  bool keepMinionItem =
+      SVR_CONST.SKILL_MINION && client &&
+      pSkill->FunctionID == SVR_CONST.SKILL_MINION &&
+      !characterManager->MinionConsumesItem(
+          client,
+          (uint32_t)pSkill->Definition->GetSpecial()->GetSpecialParams(0));
+
+  if (pSkill->ItemID > 0 && !keepMinionItem) {
     // If using an item skill and the item is a specific type and
     // non-rental but the skill does not specify a cost for it, it is
     // still consumed.
@@ -3493,7 +3516,11 @@ bool SkillManager::ProcessSkillResult(
     case objects::MiEffectiveRangeData::ValidType_t::ENEMY:
       effectiveTargets.remove_if(
           [effectiveSource](const std::shared_ptr<ActiveEntityState>& target) {
-            return effectiveSource->SameFaction(target) || !target->IsAlive();
+            // Invincible minions cannot be hit
+            auto tAI = target->GetAIState();
+            return effectiveSource->SameFaction(target) || !target->IsAlive() ||
+                   (tAI && tAI->GetCompanion() &&
+                    tAI->ActionOverridesKeyExists("Invincible"));
           });
       break;
     case objects::MiEffectiveRangeData::ValidType_t::ALLY:
@@ -4140,6 +4167,13 @@ void SkillManager::ProcessSkillResultFinal(
           // race drop rule
           auto sourceState =
               ClientState::GetEntityClientState(source->GetEntityID());
+          if (!sourceState && source->GetEntityType() == EntityType_t::ALLY &&
+              source->GetAIState() && source->GetAIState()->GetCompanion()) {
+            // A player's second demon: count it for the owner
+            sourceState = ClientState::GetEntityClientState(
+                source->GetAIState()->GetFollowEntityID());
+          }
+
           if (sourceState) {
             auto worldCID = sourceState->GetWorldCID();
 
@@ -6430,6 +6464,26 @@ void SkillManager::HandleKills(
       case EntityType_t::ENEMY:
       case EntityType_t::ALLY:
         enemiesKilled.push_back(entity);
+        if (entity->GetAIState() && entity->GetAIState()->GetCompanion()) {
+          // A player's second demon: return it to the COMP (HP 0) shortly
+          auto ownerClient = managerConnection->GetEntityClient(
+              entity->GetAIState()->GetFollowEntityID());
+          if (ownerClient) {
+            characterManager->MarkSubDemonDead(ownerClient,
+                                               entity->GetEntityID());
+            characterManager->MinionDied(ownerClient, entity->GetEntityID());
+            server->ScheduleWork(
+                (channel::ServerTime)(ChannelServer::GetServerTime() +
+                                      5000000ULL),
+                [](CharacterManager* pManager,
+                   std::shared_ptr<ChannelClientConnection> pClient,
+                   int32_t pEntityID) {
+                  pManager->DismissSubDemon(pClient, pEntityID);
+                  pManager->DismissMinion(pClient, pEntityID);
+                },
+                characterManager, ownerClient, entity->GetEntityID());
+          }
+        }
         break;
       default:
         break;
@@ -7142,6 +7196,9 @@ void SkillManager::HandleKillXP(const std::shared_ptr<objects::Enemy>& enemy,
         }
       }
     }
+
+    // The second demon (prototype, @sub xp on)
+    characterManager->GrantSubDemonXP(c, xpPair.second);
   }
 }
 
@@ -12057,6 +12114,61 @@ bool SkillManager::Traesto(
     SendFailure(activated, client, (uint8_t)SkillErrorCodes_t::GENERIC_USE);
     return false;
   }
+}
+
+bool SkillManager::SubDemon(
+    const std::shared_ptr<objects::ActivatedAbility>& activated,
+    const std::shared_ptr<SkillExecutionContext>& ctx,
+    const std::shared_ptr<ChannelClientConnection>& client) {
+  if (!client) {
+    SendFailure(activated, client, (uint8_t)SkillErrorCodes_t::GENERIC);
+    return false;
+  }
+
+  auto server = mServer.lock();
+  libcomp::String message;
+  bool done = server->GetCharacterManager()->ToggleSubDemon(client, message);
+  if (!done) {
+    SendFailure(activated, client, (uint8_t)SkillErrorCodes_t::GENERIC);
+  } else {
+    SpecialSkill(activated, ctx, client);
+  }
+
+  if (!message.IsEmpty()) {
+    server->GetChatManager()->SendChatMessage(client, ChatType_t::CHAT_SELF,
+                                              message);
+  }
+
+  return done;
+}
+
+bool SkillManager::Minion(
+    const std::shared_ptr<objects::ActivatedAbility>& activated,
+    const std::shared_ptr<SkillExecutionContext>& ctx,
+    const std::shared_ptr<ChannelClientConnection>& client) {
+  if (!client) {
+    SendFailure(activated, client, (uint8_t)SkillErrorCodes_t::GENERIC);
+    return false;
+  }
+
+  auto server = mServer.lock();
+  uint32_t minionID =
+      (uint32_t)activated->GetSkillData()->GetSpecial()->GetSpecialParams(0);
+  libcomp::String message;
+  bool done =
+      server->GetCharacterManager()->SummonMinion(client, minionID, message);
+  if (!done) {
+    SendFailure(activated, client, (uint8_t)SkillErrorCodes_t::GENERIC);
+  } else {
+    SpecialSkill(activated, ctx, client);
+  }
+
+  if (!message.IsEmpty()) {
+    server->GetChatManager()->SendChatMessage(client, ChatType_t::CHAT_SELF,
+                                              message);
+  }
+
+  return done;
 }
 
 bool SkillManager::XPUp(

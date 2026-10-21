@@ -505,6 +505,27 @@ class ServerConstants {
     /// (comma separated, up to 28 values for level 127). Optional.
     std::vector<uint64_t> PLAYER_LEVEL_XP;
 
+    /// Second demon: players can register a COMP demon (event script
+    /// action_subdemon) and bring it out as an AI ally with the
+    /// SKILL_SUB_DEMON skill (1 = on, 0 = off). Optional, defaults to off.
+    uint8_t SUB_DEMON_ENABLED;
+
+    /// Skill function ID that brings out / returns the registered second
+    /// demon. 0 = no skill. Optional.
+    uint16_t SKILL_SUB_DEMON;
+
+    /// Minions: demons summoned by an item or a skill from the types in
+    /// data/minions.xml (1 = on, 0 = off). Optional, defaults to off.
+    uint8_t MINION_ENABLED;
+
+    /// Skill function ID that summons / returns a minion (special param 1 =
+    /// minion type ID). 0 = no skill. Optional.
+    uint16_t SKILL_MINION;
+
+    /// 1 = the second demon and a minion can be out together, 0 = bringing
+    /// one out returns the other. Optional, defaults to 0.
+    uint8_t SUB_MINION_TOGETHER;
+
     /// Default zone to move players when no other zone is found
     uint32_t ZONE_DEFAULT;
 

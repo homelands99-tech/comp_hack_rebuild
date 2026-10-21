@@ -28,6 +28,22 @@
         <member type="Team*" name="Team" nulldefault="true"/>
         <member type="Match*" name="PendingMatch" nulldefault="true"/>
         <member type="s8" name="StatusIcon"/>
+        <member type="s32" name="SubDemonEntityID"/>
+        <member type="s64" name="SubDemonID"/>
+        <member type="bool" name="SubDemonXP"/>
+        <!-- Minion that is out (entity ID / type) -->
+        <member type="s32" name="MinionEntityID"/>
+        <member type="u32" name="MinionType"/>
+        <!-- Server time a minion type can be summoned again -->
+        <member type="map" name="MinionCooldowns">
+            <key type="u32"/>
+            <value type="u64"/>
+        </member>
+        <!-- HP left (1/10000) of minion types that keep their HP -->
+        <member type="map" name="MinionHP">
+            <key type="u32"/>
+            <value type="u16"/>
+        </member>
         <member type="map" name="EventCounters">
             <key type="s32"/>
             <value type="EventCounter*"/>

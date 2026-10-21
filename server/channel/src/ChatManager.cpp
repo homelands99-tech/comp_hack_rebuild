@@ -34,6 +34,7 @@
 #include <PacketCodes.h>
 #include <ServerConstants.h>
 #include <ServerDataManager.h>
+#include <MinionData.h>
 
 // object Includes
 #include <Account.h>
@@ -144,6 +145,8 @@ ChatManager::ChatManager(const std::weak_ptr<ChannelServer>& server)
   mGMands["reunion"] = &ChatManager::GMCommand_Reunion;
   mGMands["rpoint"] = &ChatManager::GMCommand_ReunionPoints;
   mGMands["scrap"] = &ChatManager::GMCommand_Scrap;
+  mGMands["sub"] = &ChatManager::GMCommand_SubDemon;
+  mGMands["minion"] = &ChatManager::GMCommand_Minion;
   mGMands["skill"] = &ChatManager::GMCommand_Skill;
   mGMands["forgetskill"] = &ChatManager::GMCommand_ForgetSkill;
   mGMands["skillpoint"] = &ChatManager::GMCommand_SkillPoint;
@@ -2455,6 +2458,11 @@ bool ChatManager::GMCommand_Help(
         "Perform reunion on your currently summoned demon setting",
         "the normal TYPE [1-12] and RANK or explicit growth TYPE",
         "by ID if no RANK specified."}},
+      {"sub",
+       {"@sub list|SLOT|off",
+        "Brings out the demon in COMP slot SLOT (1 based) as an",
+        "AI controlled ally that follows you. 'list' shows the COMP,",
+        "'off' removes it and 'xp on|off' gives it experience too."}},
       {"scrap",
        {"@scrap SLOT [NAME]",
         "Removes the item in slot SLOT from the character's",
@@ -3637,6 +3645,199 @@ bool ChatManager::GMCommand_Quest(
   server->GetEventManager()->UpdateQuest(client, (int16_t)questID, phase, true);
 
   return true;
+}
+
+bool ChatManager::GMCommand_SubDemon(
+    const std::shared_ptr<channel::ChannelClientConnection>& client,
+    const std::list<libcomp::String>& args) {
+  if (!HaveUserLevel(client, SVR_CONST.GM_CMD_LVL_LEVEL_UP)) {
+    return true;
+  }
+
+  auto server = mServer.lock();
+  auto characterManager = server->GetCharacterManager();
+  auto definitionManager = server->GetDefinitionManager();
+  auto state = client->GetClientState();
+  auto character = state->GetCharacterState()->GetEntity();
+  auto comp = character ? character->GetCOMP().Get() : nullptr;
+  if (!comp) {
+    return true;
+  }
+
+  if (!SVR_CONST.SUB_DEMON_ENABLED) {
+    return SendChatMessage(
+        client, ChatType_t::CHAT_SELF,
+        server->GetCustomMessage("SUB_DEMON_DISABLED", "2 体目は使えません。"));
+  }
+
+  libcomp::String arg = args.empty() ? "" : args.front().ToLower();
+  if (arg.IsEmpty() || arg == "list") {
+    SendChatMessage(client, ChatType_t::CHAT_SELF,
+                    server->GetCustomMessage(
+                        "GM_SUB_USAGE", "使い方: @sub 番号（2 体目を出す） / @sub off / @sub list"));
+    auto active = state->GetDemonState()->GetEntity();
+    int64_t subID = state->GetSubDemonEntityID() ? state->GetSubDemonID() : 0;
+    for (size_t i = 0; i < comp->DemonsCount(); i++) {
+      auto d = comp->GetDemons(i).Get();
+      if (!d) {
+        continue;
+      }
+
+      auto def = definitionManager->GetDevilData(d->GetType());
+      libcomp::String name = def ? def->GetBasic()->GetName() : "?";
+      SendChatMessage(
+          client, ChatType_t::CHAT_SELF,
+          libcomp::String("%1: %2 Lv%3%4")
+              .Arg((uint32_t)(i + 1))
+              .Arg(name)
+              .Arg((int32_t)d->GetCoreStats()->GetLevel())
+              .Arg(d == active
+                       ? server->GetCustomMessage("GM_SUB_MARK_PARTNER", "（召喚中）")
+                       : (subID && state->GetObjectID(d->GetUUID()) == subID
+                              ? server->GetCustomMessage("GM_SUB_MARK_SUB", "（2 体目）")
+                              : libcomp::String())));
+    }
+
+    return true;
+  }
+
+  if (arg == "off") {
+    return SendChatMessage(client, ChatType_t::CHAT_SELF,
+                           characterManager->DismissSubDemon(client)
+                               ? server->GetCustomMessage("SUB_DEMON_RETURNED",
+                                                          "2 体目を戻しました。")
+                               : server->GetCustomMessage("SUB_DEMON_NOT_OUT",
+                                                          "2 体目は出ていません。"));
+  }
+
+  if (arg == "reg" || arg == "unreg") {
+    // Same as the event script action_subdemon (register / clear)
+    int8_t result = characterManager->RegisterSubDemon(
+        state->GetCharacterState(), arg == "reg" ? 0 : 1);
+    return SendChatMessage(
+        client, ChatType_t::CHAT_SELF,
+        server->GetCustomMessage("GM_SUB_REG_RESULT",
+                                 "登録の結果: %1（1 成功、0 変化なし、-1 機能が OFF、"
+                                 "-2 召喚中の仲魔なし）")
+            .Arg((int32_t)result));
+  }
+
+  if (arg == "use") {
+    // Same as the SKILL_SUB_DEMON skill
+    libcomp::String message;
+    characterManager->ToggleSubDemon(client, message);
+    return SendChatMessage(client, ChatType_t::CHAT_SELF, message);
+  }
+
+  if (arg == "xp") {
+    // Prototype switch: give experience to the second demon too
+    libcomp::String value = args.size() > 1 ? args.back().ToLower() : "";
+    if (value == "on" || value == "off") {
+      state->SetSubDemonXP(value == "on");
+    }
+
+    return SendChatMessage(client, ChatType_t::CHAT_SELF,
+                           state->GetSubDemonXP()
+                               ? server->GetCustomMessage(
+                                     "GM_SUB_XP_ON",
+                                     "2 体目にも経験値が入ります（@sub xp off で止める）。")
+                               : server->GetCustomMessage(
+                                     "GM_SUB_XP_OFF",
+                                     "2 体目には経験値が入りません（@sub xp on で入る）。"));
+  }
+
+  bool ok = false;
+  int32_t slot = arg.ToInteger<int32_t>(&ok);
+  if (!ok || slot < 1) {
+    return SendChatMessage(client, ChatType_t::CHAT_SELF,
+                           server->GetCustomMessage(
+                               "GM_SUB_USAGE", "使い方: @sub 番号（2 体目を出す） / @sub off / @sub list"));
+  }
+
+  libcomp::String error;
+  if (!characterManager->SummonSubDemon(client, (size_t)(slot - 1), error)) {
+    return SendChatMessage(client, ChatType_t::CHAT_SELF, error);
+  }
+
+  return SendChatMessage(client, ChatType_t::CHAT_SELF,
+                         server->GetCustomMessage(
+                             "GM_SUB_SUMMONED",
+                             "2 体目を出しました（自動で戦います）。@sub off で戻します。"));
+}
+
+bool ChatManager::GMCommand_Minion(
+    const std::shared_ptr<channel::ChannelClientConnection>& client,
+    const std::list<libcomp::String>& args) {
+  if (!HaveUserLevel(client, SVR_CONST.GM_CMD_LVL_LEVEL_UP)) {
+    return true;
+  }
+
+  auto server = mServer.lock();
+  auto characterManager = server->GetCharacterManager();
+  auto definitionManager = server->GetDefinitionManager();
+  auto state = client->GetClientState();
+
+  libcomp::String arg = args.empty() ? "" : args.front().ToLower();
+  if (arg.IsEmpty() || arg == "list") {
+    SendChatMessage(client, ChatType_t::CHAT_SELF,
+                    server->GetCustomMessage(
+                        "GM_MINION_USAGE",
+                        "使い方: @minion 型の番号（出す・戻す） / @minion off / "
+                        "@minion list"));
+    auto all = server->GetServerDataManager()->GetAllMinionData();
+    std::set<uint32_t> ids;
+    for (auto& pair : all) {
+      ids.insert(pair.first);
+    }
+
+    if (ids.empty()) {
+      SendChatMessage(client, ChatType_t::CHAT_SELF,
+                      server->GetCustomMessage(
+                          "GM_MINION_NO_TYPES", "ミニオンの型がありません（data/minions.xml）。"));
+    }
+
+    for (uint32_t id : ids) {
+      auto def = all[id];
+      auto devil = definitionManager->GetDevilData(def->GetDemonType());
+      SendChatMessage(
+          client, ChatType_t::CHAT_SELF,
+          libcomp::String("%1: %2（%3 %4）%5")
+              .Arg(id)
+              .Arg(def->GetName())
+              .Arg(devil ? devil->GetBasic()->GetName() : libcomp::String("?"))
+              .Arg(def->GetKind() == objects::MinionData::Kind_t::SUPPORT
+                       ? server->GetCustomMessage("GM_MINION_KIND_SUPPORT", "置物")
+                       : server->GetCustomMessage("GM_MINION_KIND_FIGHTER", "戦う"))
+              .Arg(state->GetMinionEntityID() && state->GetMinionType() == id
+                       ? server->GetCustomMessage("GM_MINION_MARK_OUT", " ← 出ている")
+                       : libcomp::String()));
+    }
+
+    return true;
+  }
+
+  if (arg == "off") {
+    return SendChatMessage(client, ChatType_t::CHAT_SELF,
+                           characterManager->DismissMinion(client)
+                               ? server->GetCustomMessage("MINION_RETURNED",
+                                                          "ミニオンを戻しました。")
+                               : server->GetCustomMessage("MINION_NOT_OUT",
+                                                          "ミニオンは出ていません。"));
+  }
+
+  bool ok = false;
+  uint32_t id = arg.ToInteger<uint32_t>(&ok);
+  if (!ok || !id) {
+    return SendChatMessage(client, ChatType_t::CHAT_SELF,
+                           server->GetCustomMessage(
+                               "GM_MINION_USAGE",
+                               "使い方: @minion 型の番号（出す・戻す） / @minion off / "
+                               "@minion list"));
+  }
+
+  libcomp::String message;
+  characterManager->SummonMinion(client, id, message);
+  return SendChatMessage(client, ChatType_t::CHAT_SELF, message);
 }
 
 bool ChatManager::GMCommand_Scrap(

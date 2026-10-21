@@ -129,6 +129,37 @@
             <element type="u32"/>
         </member>
     </object>
+    <!-- Minion type (data/minions.xml): a demon summoned by an item or a
+         skill (SKILL_MINION, special param 1 = ID) next to the player -->
+    <object name="MinionData" persistent="false">
+        <member type="u32" name="ID"/>
+        <member type="string" name="Name"/>
+        <member type="enum" name="Kind" underlying="uint8_t">
+            <value>SUPPORT</value>
+            <value>FIGHTER</value>
+        </member>
+        <member type="u32" name="DemonType"/>
+        <member type="u8" name="Level"/>
+        <member type="list" name="Skills">
+            <element type="u32"/>
+        </member>
+        <member type="string" name="AIScript"/>
+        <member type="bool" name="Invincible" default="true"/>
+        <member type="bool" name="Follow" default="true"/>
+        <member type="enum" name="SupportMode" underlying="uint8_t">
+            <value>SKILL</value>
+            <value>AURA</value>
+        </member>
+        <member type="list" name="AuraStatuses">
+            <element type="u32"/>
+        </member>
+        <member type="u32" name="AuraInterval" default="10"/>
+        <member type="u32" name="Duration"/>
+        <member type="u32" name="Cooldown"/>
+        <member type="u32" name="DeathCooldown"/>
+        <member type="bool" name="KeepHP"/>
+        <member type="bool" name="ConsumeItem" default="true"/>
+    </object>
     <object name="DemonQuestReward" persistent="false">
         <member type="u32" name="ID"/>
         <member type="set" name="QuestTypes">

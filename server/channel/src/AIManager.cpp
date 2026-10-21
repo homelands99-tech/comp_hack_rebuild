@@ -48,6 +48,7 @@
 #include <MiCategoryData.h>
 #include <MiConditionData.h>
 #include <MiCostTbl.h>
+#include <MiAddStatusTbl.h>
 #include <MiDamageData.h>
 #include <MiDevilData.h>
 #include <MiEffectiveRangeData.h>
@@ -73,6 +74,64 @@
 #define FOLLOW_DISTANCE_MAX (MAX_ENTITY_DRAW_DISTANCE * 0.66f)
 #define FOLLOW_DISTANCE_FAR (MAX_ENTITY_DRAW_DISTANCE * 0.25f)
 #define FOLLOW_DISTANCE_CLOSE (300.f)
+
+/**
+ * Companion (a player's second demon) setting set by its AI script
+ * (scripts/AI/ai_subdemon.nut, prepare: SetActionOverridesEntry), or the
+ * default value when the script does not set it.
+ * @param aiState AI state of the companion
+ * @param key Setting name
+ * @param def Default value
+ * @return Setting value
+ */
+static float CompanionParam(const std::shared_ptr<channel::AIState>& aiState,
+                            const char* key, float def) {
+  if (aiState && aiState->ActionOverridesKeyExists(key)) {
+    bool ok = false;
+    float v = aiState->GetActionOverrides(key).ToDecimal<float>(&ok);
+    if (ok) {
+      return v;
+    }
+  }
+
+  return def;
+}
+
+// Companions stay closer than normal followers...
+#define FOLLOW_DISTANCE_COMPANION \
+  CompanionParam(aiState, "FollowDistance", 300.f)
+
+// ...and walk up to this distance of the owner when catching up
+#define FOLLOW_DISTANCE_COMPANION_CLOSE \
+  CompanionParam(aiState, "FollowClose", 220.f)
+
+// ...and do not drift far from their owner during combat either
+#define FOLLOW_DISTANCE_COMPANION_COMBAT \
+  CompanionParam(aiState, "CombatFollow", 750.f)
+
+// Companions heal their owner at or below this HP ratio
+#define COMPANION_HEAL_RATIO \
+  (CompanionParam(aiState, "HealRatio", 50.f) * 0.01f)
+
+// Companions use a support skill on their owner at most this often (us)
+#define COMPANION_SUPPORT_INTERVAL \
+  ((uint64_t)(CompanionParam(aiState, "SupportInterval", 30.f) * 1000000.f))
+
+// Companions try to heal their owner at most this often (us)
+#define COMPANION_HEAL_INTERVAL \
+  ((uint64_t)(CompanionParam(aiState, "HealInterval", 3.f) * 1000000.f))
+
+// Companions give up a skill aimed at their owner after this long (us)
+#define COMPANION_SKILL_TIMEOUT \
+  ((uint64_t)(CompanionParam(aiState, "SkillTimeout", 6.f) * 1000000.f))
+
+// What a companion does to help (1 = on, 0 = off)
+#define COMPANION_USE(key) (CompanionParam(aiState, key, 1.f) != 0.f)
+
+// Minion settings set by the server (1 = on): NoAttack (support only),
+// Stay (does not follow), Invincible
+#define COMPANION_FLAG(key) \
+  (aiState->GetCompanion() && CompanionParam(aiState, key, 0.f) != 0.f)
 
 using namespace channel;
 
@@ -1027,8 +1086,13 @@ bool AIManager::UpdateState(const std::shared_ptr<ActiveEntityState>& eState,
           if (aiState->GetPreviousStatus() == AIStatus_t::AGGRO ||
               aiState->GetPreviousStatus() == AIStatus_t::COMBAT ||
               aiState->GetPreviousStatus() == AIStatus_t::ENRAGED) {
-            // Leftover combat skill, cancel it
-            cancelActivatedSkill = true;
+            // Leftover combat skill, cancel it (but not a companion's skill
+            // on its owner or itself, see UpdateCompanionSkill)
+            int32_t skillTarget = (int32_t)activated->GetTargetObjectID();
+            cancelActivatedSkill =
+                !aiState->GetCompanion() ||
+                (skillTarget != aiState->GetFollowEntityID() &&
+                 skillTarget != eState->GetEntityID());
           }
           break;
         case AIStatus_t::ENRAGED: {
@@ -1249,8 +1313,16 @@ bool AIManager::UpdateState(const std::shared_ptr<ActiveEntityState>& eState,
         auto server = mServer.lock();
         auto skillManager = server->GetSkillManager();
 
+        auto cmdSkillData =
+            activated ? activated->GetSkillData() : cmdSkill->GetSkillData();
+        // Only a companion (second demon) keeps revival skills aimed at a
+        // dead target; other AI behave as before
+        bool reviving = aiState->GetCompanion() && cmdSkillData &&
+                        cmdSkillData->GetTarget()->GetType() ==
+                            objects::MiTargetData::Type_t::DEAD_ALLY;
+
         if (cmdSkill->GetTargetEntityID() > 0) {
-          if (!targetEntity || !targetEntity->IsAlive() ||
+          if (!targetEntity || (!targetEntity->IsAlive() && !reviving) ||
               targetEntity->GetAIIgnored()) {
             // Target invalid or dead, cancel the skill and move on
             if (activated) {
@@ -1295,9 +1367,21 @@ bool AIManager::UpdateState(const std::shared_ptr<ActiveEntityState>& eState,
           }
         } else {
           // Activate the skill
-          skillManager->ActivateSkill(
+          bool activatedOk = skillManager->ActivateSkill(
               eState, cmdSkill->GetSkillID(), cmdSkill->GetTargetEntityID(),
               cmdSkill->GetTargetEntityID(), ACTIVATION_TARGET);
+          if (!activatedOk && aiState->GetCompanion()) {
+            // Diagnostic
+            LogAIManagerDebug([&]() {
+              auto t = targetEntity;
+              return libcomp::String("[sub] could not start skill %1 (target"
+                                     " %2, alive %3, dist %4)\n")
+                  .Arg(cmdSkill->GetSkillID())
+                  .Arg(cmdSkill->GetTargetEntityID())
+                  .Arg(t ? (t->IsAlive() ? "yes" : "no") : "none")
+                  .Arg(t ? (int32_t)eState->GetDistance(t) : -1);
+            });
+          }
         }
 
         aiState->PopCommand(cmdSkill);
@@ -1342,8 +1426,39 @@ bool AIManager::UpdateEnemyState(
     bool isNight) {
   auto aiState = eState->GetAIState();
 
+  if (aiState->GetCompanion()) {
+    if (UpdateCompanionSkill(eState, now)) {
+      return false;
+    }
+
+    // Helping the owner comes before following and fighting
+    if (!eState->GetActivatedAbility() && !aiState->GetCurrentCommand() &&
+        eState->CanAct() && PrepareCompanionSkill(eState, now)) {
+      return false;
+    }
+  }
+
+  // Companions walk with their owner out of combat
+  bool companionWalk = aiState->GetCompanion() &&
+                       aiState->HasFollowTarget() && !COMPANION_FLAG("Stay") &&
+                       (aiState->IsWandering() || aiState->IsFollowing());
+  if (companionWalk) {
+    switch (CompanionFollow(eState, now)) {
+      case 1:
+        return true;
+      case 2:
+        return false;
+      default:
+        break;
+    }
+  } else if (aiState->GetCompanion() && eState->GetSpeedBoost()) {
+    // Fighting: normal speed again
+    eState->SetSpeedBoost(0);
+  }
+
   // Check if we need to pursue the follow target
-  if (aiState->HasFollowTarget() && Follow(eState, now)) {
+  if (!companionWalk && aiState->HasFollowTarget() &&
+      !COMPANION_FLAG("Stay") && Follow(eState, now)) {
     return false;
   }
 
@@ -1359,8 +1474,28 @@ bool AIManager::UpdateEnemyState(
       return false;
     }
 
+    if (aiState->GetCompanion()) {
+      // Stay with the owner (see Follow) but heal it when needed
+      if (eState->CanAct() && !aiState->GetCurrentCommand() &&
+          !eState->GetActivatedAbility()) {
+        PrepareCompanionSkill(eState, now);
+      }
+
+      return false;
+    }
+
     Wander(eState, eBase);
     return true;
+  }
+
+  if (COMPANION_FLAG("NoAttack")) {
+    // Support minions never fight: back to staying with the owner
+    if (aiState->GetTargetEntityID() > 0) {
+      UpdateAggro(eState, -1);
+    }
+
+    aiState->SetStatus(aiState->GetDefaultStatus());
+    return false;
   }
 
   auto zone = eState->GetZone();
@@ -1381,6 +1516,56 @@ bool AIManager::UpdateEnemyState(
       UpdateAggro(eState, -1);
       aiState->SetStatus(aiState->GetDefaultStatus());
       return false;
+    }
+  }
+
+  if (aiState->GetCompanion() && target) {
+    // Companions fight what their owner is fighting and stay near it
+    auto owner = zone->GetActiveEntity(aiState->GetFollowEntityID());
+    if (owner) {
+      owner->RefreshCurrentPosition(now);
+      std::shared_ptr<ActiveEntityState> best;
+      float bestDist = 0.f;
+      for (int32_t opponentID : owner->GetOpponentIDs()) {
+        auto o = zone->GetActiveEntity(opponentID);
+        if (!o || !o->IsAlive() || !o->Ready() || o->GetAIIgnored() ||
+            eState->SameFaction(o)) {
+          continue;
+        }
+
+        o->RefreshCurrentPosition(now);
+        if (o->GetDistance(owner) > FOLLOW_DISTANCE_MAX) {
+          continue;
+        }
+
+        if (o == target) {
+          best = nullptr;  // Already on one of the owner's opponents
+          break;
+        }
+
+        float d = eState->GetDistance(o);
+        if (!best || d < bestDist) {
+          best = o;
+          bestDist = d;
+        }
+      }
+
+      if (best) {
+        LogAIManagerDebug([&]() {
+          return libcomp::String("[sub] switch to the owner's enemy (dist %1)\n")
+              .Arg((int32_t)bestDist);
+        });
+        UpdateAggro(eState, best->GetEntityID());
+        target = best;
+      } else if (target->GetDistance(owner) > FOLLOW_DISTANCE_MAX) {
+        // Do not chase enemies far away from the owner
+        LogAIManagerDebug([&]() {
+          return libcomp::String("[sub] drop target far from the owner\n");
+        });
+        UpdateAggro(eState, -1);
+        aiState->SetStatus(aiState->GetDefaultStatus());
+        return false;
+      }
     }
   }
 
@@ -1495,8 +1680,12 @@ bool AIManager::UpdateEnemyState(
 
     // Skill charged, cancel, execute or move within range
     int64_t activationTarget = activated->GetTargetObjectID();
+    bool companionOnOwner =
+        aiState->GetCompanion() &&
+        (int32_t)activationTarget == aiState->GetFollowEntityID();
     if (activationTarget > 0 && targetEntityID != (int32_t)activationTarget &&
-        eState->GetEntityID() != (int32_t)activationTarget) {
+        eState->GetEntityID() != (int32_t)activationTarget &&
+        !companionOnOwner) {
       // Target changed
       skillManager->TargetSkill(eState, targetEntityID);
       return false;
@@ -1536,10 +1725,24 @@ bool AIManager::UpdateEnemyState(
   } else {
     uint32_t waitTime = 0;
 
+    // Diagnostic (debug log): why a companion is not acting, at most every 2s
+    auto companionLog = [&](const libcomp::String& why) {
+      if (aiState->GetCompanion() && now >= aiState->GetCompanionLogTime()) {
+        aiState->SetCompanionLogTime(now + 2000000ULL);
+        LogAIManagerDebug([&]() {
+          return libcomp::String("[sub] combat: %1 (target dist %2, skills %3)\n")
+              .Arg(why)
+              .Arg((int32_t)targetDist)
+              .Arg((uint32_t)eState->CurrentSkillsCount());
+        });
+      }
+    };
+
     int16_t waitChance = (int16_t)(100.f * aiState->GetAggression());
     if (RNG(int16_t, 1, waitChance > 25 ? waitChance : 25) <= 20) {
       // 20% chance to just wait (lower for high aggression)
       waitTime = 1000;
+      companionLog("random wait");
     } else if (eState->CurrentSkillsCount() > 0) {
       // If aggro limit is enabled and the target is being knocked back
       // wait instead to stagger attacks
@@ -1548,6 +1751,8 @@ bool AIManager::UpdateEnemyState(
         uint64_t kbTime = target->GetStatusTimes(STATUS_KNOCKBACK);
         if (CombatStaggerEnabled() && kbTime) {
           waitTime = (uint32_t)((kbTime - now) / 1000 + 500);
+          companionLog(libcomp::String("target knocked back, wait %1 ms")
+                           .Arg(waitTime));
         }
       }
 
@@ -1555,6 +1760,8 @@ bool AIManager::UpdateEnemyState(
         // All normal movement is based off skill usage, determine
         // which skill to use next
         if (!PrepareSkillUsage(eState)) {
+          companionLog("no usable attack skill, drop target");
+
           // No skill can be used, drop aggro
           UpdateAggro(eState, -1);
 
@@ -1566,10 +1773,12 @@ bool AIManager::UpdateEnemyState(
         } else if (!aiState->GetCurrentCommand()) {
           // Nothing was queued, wait instead
           waitTime = (uint32_t)aiState->GetThinkSpeed();
+          companionLog("nothing queued, wait");
         }
       }
     } else {
       // No skills exist, drop aggro
+      companionLog("has no skills");
       UpdateAggro(eState, -1);
     }
 
@@ -1599,10 +1808,25 @@ bool AIManager::Follow(const std::shared_ptr<ActiveEntityState>& eState,
     followEntity->RefreshCurrentPosition(now);
 
     float maxDistance =
-        aiState->IsAggro() ? FOLLOW_DISTANCE_MAX : FOLLOW_DISTANCE_FAR;
+        aiState->IsAggro()
+            ? (aiState->GetCompanion() ? FOLLOW_DISTANCE_COMPANION_COMBAT
+                                       : FOLLOW_DISTANCE_MAX)
+            : (aiState->GetCompanion() ? FOLLOW_DISTANCE_COMPANION
+                                       : FOLLOW_DISTANCE_FAR);
     if (eState->GetDistance(followEntity) > maxDistance) {
+      if (aiState->GetCompanion() && !aiState->IsFollowing()) {
+        LogAIManagerDebug([&]() {
+          return libcomp::String("[sub] follow owner: dist %1 > %2 (status %3)\n")
+              .Arg((int32_t)eState->GetDistance(followEntity))
+              .Arg((int32_t)maxDistance)
+              .Arg((int32_t)aiState->GetStatus());
+        });
+      }
+
       // Pursue follow target
-      if (Chase(eState, followEntity->GetEntityID(), FOLLOW_DISTANCE_CLOSE)) {
+      if (Chase(eState, followEntity->GetEntityID(),
+                aiState->GetCompanion() ? FOLLOW_DISTANCE_COMPANION_CLOSE
+                                        : FOLLOW_DISTANCE_CLOSE)) {
         // Start following
         if (!aiState->IsFollowing()) {
           UpdateAggro(eState, -1);
@@ -1623,7 +1847,9 @@ bool AIManager::Follow(const std::shared_ptr<ActiveEntityState>& eState,
 
     if (followEntity) {
       Point src(followEntity->GetCurrentX(), followEntity->GetCurrentY());
-      Point target(src.x, src.y + FOLLOW_DISTANCE_CLOSE);
+      Point target(src.x, src.y + (aiState->GetCompanion()
+                                         ? FOLLOW_DISTANCE_COMPANION_CLOSE
+                                         : FOLLOW_DISTANCE_CLOSE));
 
       target = ZoneManager::RotatePoint(target, src,
                                         ZoneManager::GetRandomRotation());
@@ -1643,6 +1869,125 @@ bool AIManager::Follow(const std::shared_ptr<ActiveEntityState>& eState,
   }
 
   return false;
+}
+
+int8_t AIManager::CompanionFollow(
+    const std::shared_ptr<ActiveEntityState>& eState, uint64_t now) {
+  auto aiState = eState->GetAIState();
+  auto zone = eState->GetZone();
+  if (!zone || eState->GetActivatedAbility() || !eState->CanMove() ||
+      eState->StatusTimesKeyExists(STATUS_WAITING)) {
+    return 0;
+  }
+
+  auto owner = zone->GetActiveEntity(aiState->GetFollowEntityID());
+  if (!owner || !owner->Ready()) {
+    return 0;
+  }
+
+  if (aiState->GetDespawnTimeout()) {
+    aiState->SetDespawnTimeout(0);
+  }
+
+  if (aiState->IsFollowing()) {
+    // Caught up after a fight
+    aiState->SetStatus(aiState->GetDefaultStatus());
+    aiState->ResetStatusChanged();
+  }
+
+  owner->RefreshCurrentPosition(now);
+  eState->RefreshCurrentPosition(now);
+
+  float back = FOLLOW_DISTANCE_COMPANION_CLOSE;
+  float startDist = FOLLOW_DISTANCE_COMPANION;
+  // The second demon walks on one side, a minion on the other
+  float side = (COMPANION_FLAG("Minion") ? -1.f : 1.f) *
+               CompanionParam(aiState, "FollowSide", 80.f);
+
+  Point o(owner->GetCurrentX(), owner->GetCurrentY());
+  Point e(eState->GetCurrentX(), eState->GetCurrentY());
+  Point ownerDest(owner->GetDestinationX(), owner->GetDestinationY());
+  float ownerLeft = o.GetDistance(ownerDest);
+
+  // Own full speed (no boost)
+  int16_t oldBoost = eState->GetSpeedBoost();
+  eState->SetSpeedBoost(0);
+  float fullSpeed = eState->GetMovementSpeed();
+  float speed = fullSpeed;
+
+  Point aim;
+  if (owner->IsMoving() && ownerLeft >= 1.f) {
+    // Direction the owner walks in and the place behind it
+    float ux = (ownerDest.x - o.x) / ownerLeft;
+    float uy = (ownerDest.y - o.y) / ownerLeft;
+
+    // Position along the walking direction (0 = the owner) and the place
+    // it should keep (behind the owner)
+    float along = (e.x - o.x) * ux + (e.y - o.y) * uy;
+    float gap = along + back;  // > 0: ahead of its place, < 0: behind
+
+    // Aim a little ahead so it keeps walking, but never past the place
+    // behind where the owner stops
+    float ownerSpeed = owner->GetMovementSpeed();
+    float aimAlong = std::min(-back + std::max(200.f, ownerSpeed),
+                              ownerLeft - back);
+    aim = Point(o.x + ux * aimAlong - uy * side, o.y + uy * aimAlong + ux * side);
+
+    // Walk at the owner's speed, faster when behind, slower when ahead
+    float rate = std::max(0.5f, std::min(1.6f, 1.f - gap / 300.f));
+    speed = std::min(fullSpeed, ownerSpeed * rate);
+    if (speed < 10.f) {
+      speed = fullSpeed;
+    }
+  } else {
+    // The owner stands still: stay unless too far, then walk up to it
+    float dist = e.GetDistance(o);
+    if (dist <= startDist && (!eState->IsMoving() || dist <= back)) {
+      if (eState->IsMoving()) {
+        eState->Stop(now);
+        eState->SetSpeedBoost(0);
+        return 1;
+      }
+
+      return 0;
+    }
+
+    if (dist < 1.f) {
+      eState->SetSpeedBoost(oldBoost);
+      return 0;
+    }
+
+    aim = Point(o.x + (e.x - o.x) / dist * back,
+                o.y + (e.y - o.y) / dist * back);
+  }
+
+  // Keep the place inside the map (as seen from the owner)
+  float aimDist = o.GetDistance(aim);
+  if (aimDist > 1.f) {
+    aim = mServer.lock()->GetZoneManager()->GetLinearPoint(
+        o.x, o.y, aim.x, aim.y, aimDist, false, zone);
+  }
+
+  int16_t boost = (int16_t)std::round((speed - fullSpeed) / 10.f);
+
+  // Nothing new to do: same place, same speed
+  Point curDest(eState->GetDestinationX(), eState->GetDestinationY());
+  if ((eState->IsMoving() && curDest.GetDistance(aim) < 40.f &&
+       std::abs(boost - oldBoost) < 3) ||
+      (!eState->IsMoving() && e.GetDistance(aim) < 30.f)) {
+    eState->SetSpeedBoost(oldBoost);
+    return 0;
+  }
+
+  Point collidePoint;
+  if (zone->Collides(Line(e, aim), collidePoint)) {
+    // Something is in the way: find a path to the owner instead
+    return Chase(eState, owner->GetEntityID(), back) ? 2 : 0;
+  }
+
+  eState->SetSpeedBoost(boost);
+  eState->Move(aim.x, aim.y, now);
+  return 1;
 }
 
 void AIManager::Move(const std::shared_ptr<ActiveEntityState>& eState,
@@ -1862,12 +2207,41 @@ std::shared_ptr<ActiveEntityState> AIManager::Retarget(
 
   int32_t currentTarget = aiState->GetTargetEntityID();
 
+  if (COMPANION_FLAG("NoAttack")) {
+    // Support minions do not look for targets
+    return nullptr;
+  }
+
   float sourceX = eState->GetCurrentX();
   float sourceY = eState->GetCurrentY();
 
   auto opponentIDs = eState->GetOpponentIDs();
   std::list<std::shared_ptr<ActiveEntityState>> possibleTargets;
-  if (opponentIDs.size() > 0) {
+  auto owner = aiState->GetCompanion()
+                   ? zone->GetActiveEntity(aiState->GetFollowEntityID())
+                   : nullptr;
+  if (owner && opponentIDs.size() == 0) {
+    // Companion not in combat yet: help with the owner's opponents only so
+    // it does not pull enemies by itself
+    for (int32_t opponentID : owner->GetOpponentIDs()) {
+      auto entity = zone->GetActiveEntity(opponentID);
+      if (entity && entity->IsAlive() && entity->Ready() &&
+          !entity->GetAIIgnored() && !eState->SameFaction(entity)) {
+        entity->RefreshCurrentPosition(now);
+        possibleTargets.push_back(entity);
+      }
+    }
+
+    if (possibleTargets.size() > 0 &&
+        (aiState->IsFollowing() || aiState->IsWandering())) {
+      LogAIManagerDebug([&]() {
+        return libcomp::String("[sub] owner is fighting %1 enemies, going after"
+                               " one\n")
+            .Arg((uint32_t)possibleTargets.size());
+      });
+      aiState->SetStatus(AIStatus_t::AGGRO);
+    }
+  } else if (opponentIDs.size() > 0) {
     // Currently in combat, only pull from opponents. Use deaggro
     // distance instead of the normal aggro distance since the AI
     // should technically be aggro until no opponents are still around
@@ -2287,6 +2661,327 @@ bool AIManager::CanRetrySkill(
   return false;
 }
 
+bool AIManager::UpdateCompanionSkill(
+    const std::shared_ptr<ActiveEntityState>& eState, uint64_t now) {
+  auto aiState = eState->GetAIState();
+  auto activated = eState->GetActivatedAbility();
+  int32_t ownerID = aiState->GetFollowEntityID();
+  if (!activated || ownerID <= 0) {
+    return false;
+  }
+
+  // Skills aimed at the owner, or a heal the companion uses on itself
+  int32_t targetID = (int32_t)activated->GetTargetObjectID();
+  bool onOwner = targetID == ownerID;
+  bool onSelf = false;
+  if (!onOwner && targetID == eState->GetEntityID()) {
+    switch (activated->GetSkillData()
+                ->GetDamage()
+                ->GetBattleDamage()
+                ->GetFormula()) {
+      case objects::MiBattleDamageData::Formula_t::HEAL_NORMAL:
+      case objects::MiBattleDamageData::Formula_t::HEAL_STATIC:
+      case objects::MiBattleDamageData::Formula_t::HEAL_MAX_PERCENT:
+        onSelf = true;
+        break;
+      default:
+        break;
+    }
+  }
+
+  if (!onOwner && !onSelf) {
+    // Normal logic handles it
+    return false;
+  }
+
+  auto skillManager = mServer.lock()->GetSkillManager();
+  auto zone = eState->GetZone();
+  auto owner = zone ? zone->GetActiveEntity(ownerID) : nullptr;
+  bool reviveSkill = activated->GetSkillData()->GetTarget()->GetType() ==
+                     objects::MiTargetData::Type_t::DEAD_ALLY;
+  if ((onOwner && (!owner || owner->IsAlive() == reviveSkill)) ||
+      now > activated->GetActivationTime() + COMPANION_SKILL_TIMEOUT) {
+    // Owner gone or it took too long, drop the skill (checked first so a
+    // skill stuck in any state cannot hold the companion forever)
+    LogAIManagerDebug([&]() {
+      return libcomp::String("[sub] give up skill %1 (error %2, charging %3,"
+                             " cmd %4)\n")
+          .Arg(activated->GetSkillData()->GetCommon()->GetID())
+          .Arg((int32_t)activated->GetErrorCode())
+          .Arg(eState->GetStatusTimes(STATUS_CHARGING) ? "yes" : "no")
+          .Arg(aiState->GetCurrentCommand() ? "yes" : "no");
+    });
+    skillManager->CancelSkill(eState, activated->GetActivationID());
+    return false;
+  }
+
+  if (aiState->GetCurrentCommand() ||
+      (activated->GetExecutionRequestTime() &&
+       activated->GetErrorCode() == -1) ||
+      eState->GetStatusTimes(STATUS_CHARGING)) {
+    // Busy, executing or still charging
+    return true;
+  }
+
+  if (onSelf) {
+    LogAIManagerDebug([&]() {
+      return libcomp::String("[sub] execute skill %1 on self\n")
+          .Arg(activated->GetSkillData()->GetCommon()->GetID());
+    });
+    aiState->QueueCommand(std::make_shared<AIUseSkillCommand>(activated));
+    return true;
+  }
+
+  // Same range as the server check (with a small buffer)
+  owner->RefreshCurrentPosition(now);
+  auto skillData = activated->GetSkillData();
+  float range = (float)(SKILL_DISTANCE_OFFSET + (owner->GetHitboxSize() * 10) +
+                        (eState->GetHitboxSize() * 10) +
+                        (skillData->GetTarget()->GetRange() * 10)) -
+                20.f;
+  float dist = eState->GetDistance(owner);
+  if (dist > range) {
+    bool moving = !COMPANION_FLAG("Stay") && Chase(eState, ownerID, range);
+    LogAIManagerDebug([&]() {
+      return libcomp::String("[sub] skill %1 charged, owner too far %2 > %3,"
+                             " chase %4 (canMove %5)\n")
+          .Arg(skillData->GetCommon()->GetID())
+          .Arg((int32_t)dist)
+          .Arg((int32_t)range)
+          .Arg(moving ? "ok" : "FAILED")
+          .Arg(eState->CanMove() ? "yes" : "no");
+    });
+  } else {
+    LogAIManagerDebug([&]() {
+      return libcomp::String("[sub] execute skill %1 on owner (dist %2 <= %3,"
+                             " last error %4)\n")
+          .Arg(skillData->GetCommon()->GetID())
+          .Arg((int32_t)dist)
+          .Arg((int32_t)range)
+          .Arg((int32_t)activated->GetErrorCode());
+    });
+    aiState->QueueCommand(std::make_shared<AIUseSkillCommand>(activated));
+  }
+
+  return true;
+}
+
+bool AIManager::PrepareCompanionSkill(
+    const std::shared_ptr<ActiveEntityState>& eState, uint64_t now) {
+  auto aiState = eState->GetAIState();
+  auto zone = eState->GetZone();
+  auto owner = zone ? zone->GetActiveEntity(aiState->GetFollowEntityID())
+                    : nullptr;
+  if (!owner || !owner->Ready()) {
+    return false;
+  }
+
+  RefreshSkillMap(eState, aiState);
+  auto skillMap = aiState->GetSkillMap();
+  auto skillManager = mServer.lock()->GetSkillManager();
+
+  // Pick a usable skill of the type, preferring ones that target an ally
+  auto pick = [&](uint16_t type) -> std::shared_ptr<objects::MiSkillData> {
+    std::list<std::shared_ptr<objects::MiSkillData>> usable;
+    for (auto& weight : skillMap[type]) {
+      auto skillData = weight.first;
+      if (eState->SkillCooldownsKeyExists(
+              skillData->GetBasic()->GetCooldownID()) ||
+          skillManager->SkillRestricted(eState, skillData)) {
+        continue;
+      }
+
+      if (type == AI_SKILL_TYPE_HEAL) {
+        // Only skills that restore HP (not cures like Patra)
+        switch (skillData->GetDamage()->GetBattleDamage()->GetFormula()) {
+          case objects::MiBattleDamageData::Formula_t::HEAL_NORMAL:
+          case objects::MiBattleDamageData::Formula_t::HEAL_STATIC:
+          case objects::MiBattleDamageData::Formula_t::HEAL_MAX_PERCENT:
+            break;
+          default:
+            continue;
+        }
+      }
+
+      if (type == AI_SKILL_TYPE_SUPPORT) {
+        // Only skills that can be aimed at the owner (not cures or other
+        // skills on the companion itself)
+        auto targetType = skillData->GetTarget()->GetType();
+        if (targetType != objects::MiTargetData::Type_t::ALLY &&
+            targetType != objects::MiTargetData::Type_t::ALLY_PLAYER &&
+            targetType != objects::MiTargetData::Type_t::PARTY) {
+          continue;
+        }
+
+        // Skip support skills whose effects the owner already has
+        bool needed = false;
+        for (auto addStatus : skillData->GetDamage()->GetAddStatuses()) {
+          if (!owner->StatusEffectActive(addStatus->GetStatusID())) {
+            needed = true;
+            break;
+          }
+        }
+
+        if (!needed) {
+          continue;
+        }
+      }
+
+      usable.push_back(skillData);
+    }
+
+    return usable.size() > 0 ? libcomp::Randomizer::GetEntry(usable)
+                             : nullptr;
+  };
+
+  auto queue = [&](const std::shared_ptr<objects::MiSkillData>& skillData,
+                   bool onSelf = false) {
+    int32_t targetID = eState->GetEntityID();
+    switch (skillData->GetTarget()->GetType()) {
+      case objects::MiTargetData::Type_t::ALLY:
+      case objects::MiTargetData::Type_t::ALLY_PLAYER:
+      case objects::MiTargetData::Type_t::PARTY:
+      case objects::MiTargetData::Type_t::DEAD_ALLY:
+        if (!onSelf) {
+          targetID = owner->GetEntityID();
+        }
+        break;
+      default:
+        break;
+    }
+
+    if (targetID == owner->GetEntityID()) {
+      // Get within the skill's range of the owner first
+      owner->RefreshCurrentPosition(now);
+      float range = (float)(SKILL_DISTANCE_OFFSET +
+                            (owner->GetHitboxSize() * 10) +
+                            (eState->GetHitboxSize() * 10) +
+                            (skillData->GetTarget()->GetRange() * 10)) -
+                    20.f;
+      float dist = eState->GetDistance(owner);
+      if (dist > range) {
+        bool moving =
+            !COMPANION_FLAG("Stay") && Chase(eState, owner->GetEntityID(), range);
+        LogAIManagerDebug([&]() {
+          return libcomp::String("[sub] want skill %1, owner too far %2 > %3,"
+                                 " chase %4 (canMove %5)\n")
+              .Arg(skillData->GetCommon()->GetID())
+              .Arg((int32_t)dist)
+              .Arg((int32_t)range)
+              .Arg(moving ? "ok" : "FAILED")
+              .Arg(eState->CanMove() ? "yes" : "no");
+        });
+        return;
+      }
+    }
+
+    LogAIManagerDebug([&]() {
+      return libcomp::String("[sub] start skill %1 on %2\n")
+          .Arg(skillData->GetCommon()->GetID())
+          .Arg(targetID == owner->GetEntityID() ? "owner" : "self");
+    });
+    aiState->QueueCommand(
+        std::make_shared<AIUseSkillCommand>(skillData, targetID));
+  };
+
+  if (!owner->IsAlive()) {
+    // Revive the owner with any revive skill (aimed at a dead ally)
+    if (!COMPANION_USE("UseRevive") || now < aiState->GetCompanionHealTime()) {
+      return false;
+    }
+
+    aiState->SetCompanionHealTime(now + COMPANION_HEAL_INTERVAL);
+
+    // Revive skills are not in the AI skill map, check every skill
+    auto definitionManager = mServer.lock()->GetDefinitionManager();
+    std::list<std::shared_ptr<objects::MiSkillData>> revives;
+    for (uint32_t skillID : eState->GetCurrentSkills()) {
+      auto skillData = definitionManager->GetSkillData(skillID);
+      if (skillData &&
+          skillData->GetTarget()->GetType() ==
+              objects::MiTargetData::Type_t::DEAD_ALLY &&
+          !eState->SkillCooldownsKeyExists(
+              skillData->GetBasic()->GetCooldownID()) &&
+          !skillManager->SkillRestricted(eState, skillData)) {
+        revives.push_back(skillData);
+      }
+    }
+
+    LogAIManagerDebug([&]() {
+      return libcomp::String("[sub] owner is dead, revive skills usable: %1\n")
+          .Arg((uint32_t)revives.size());
+    });
+
+    if (revives.size() == 0) {
+      return false;
+    }
+
+    queue(libcomp::Randomizer::GetEntry(revives));
+    return true;
+  }
+
+  float hpRatio =
+      owner->GetMaxHP() > 0
+          ? (float)owner->GetCoreStats()->GetHP() / (float)owner->GetMaxHP()
+          : 1.f;
+  if (COMPANION_USE("UseHeal") && hpRatio <= COMPANION_HEAL_RATIO &&
+      now >= aiState->GetCompanionHealTime()) {
+    auto skillData = pick(AI_SKILL_TYPE_HEAL);
+
+    // Diagnostic (debug log): what the companion has to heal with
+    LogAIManagerDebug([&]() {
+      libcomp::String ids;
+      for (auto& weight : skillMap[AI_SKILL_TYPE_HEAL]) {
+        ids += libcomp::String(" %1").Arg(weight.first->GetCommon()->GetID());
+      }
+
+      return libcomp::String("[sub] owner HP %1 percent, heal skills:%2, picked %3,"
+                             " dist %4, canMove %5, activated %6\n")
+          .Arg((int32_t)(hpRatio * 100.f))
+          .Arg(ids.IsEmpty() ? libcomp::String(" none") : ids)
+          .Arg(skillData ? skillData->GetCommon()->GetID() : 0)
+          .Arg((int32_t)eState->GetDistance(owner))
+          .Arg(eState->CanMove() ? "yes" : "no")
+          .Arg(eState->GetActivatedAbility() ? "yes" : "no");
+    });
+
+    if (skillData) {
+      // Do not keep retrying right away if the heal does not work
+      aiState->SetCompanionHealTime(now + COMPANION_HEAL_INTERVAL);
+      queue(skillData);
+      return true;
+    }
+
+    // Nothing usable: check again a little later
+    aiState->SetCompanionHealTime(now + COMPANION_HEAL_INTERVAL);
+  } else if (COMPANION_USE("SelfHeal") &&
+             now >= aiState->GetCompanionHealTime() &&
+             eState->GetMaxHP() > 0 &&
+             (float)eState->GetCoreStats()->GetHP() /
+                     (float)eState->GetMaxHP() <=
+                 COMPANION_HEAL_RATIO) {
+    // The owner is fine: heal itself when low
+    auto skillData = pick(AI_SKILL_TYPE_HEAL);
+    aiState->SetCompanionHealTime(now + COMPANION_HEAL_INTERVAL);
+    if (skillData) {
+      queue(skillData, true);
+      return true;
+    }
+  }
+
+  if (COMPANION_USE("UseSupport") && owner->GetOpponentIDs().size() > 0 &&
+      now >= aiState->GetCompanionSupportTime()) {
+    auto skillData = pick(AI_SKILL_TYPE_SUPPORT);
+    if (skillData) {
+      aiState->SetCompanionSupportTime(now + COMPANION_SUPPORT_INTERVAL);
+      queue(skillData);
+      return true;
+    }
+  }
+
+  return false;
+}
+
 bool AIManager::PrepareSkillUsage(
     const std::shared_ptr<ActiveEntityState>& eState) {
   auto zone = eState->GetZone();
@@ -2324,6 +3019,11 @@ bool AIManager::PrepareSkillUsage(
     return false;
   }
 
+  if (aiState->GetCompanion() &&
+      PrepareCompanionSkill(eState, ChannelServer::GetServerTime())) {
+    return true;
+  }
+
   auto skillMap = aiState->GetSkillMap();
 
   // Non-defensive/support combat skills are only accessible to first
@@ -2352,6 +3052,11 @@ bool AIManager::PrepareSkillUsage(
       bool isHeal = pair.first == AI_SKILL_TYPE_HEAL;
       bool isDefense = pair.first == AI_SKILL_TYPE_DEF;
       bool isSupport = pair.first == AI_SKILL_TYPE_SUPPORT;
+
+      if (aiState->GetCompanion() && (isHeal || isSupport)) {
+        // Companions heal/support their owner via PrepareCompanionSkill
+        continue;
+      }
 
       if ((aiState->GetSkillSettings() & pair.first) != 0 &&
           (isSupport || isHeal ||  // No special requirement (yet)

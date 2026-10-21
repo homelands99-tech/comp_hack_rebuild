@@ -379,6 +379,37 @@ bool ServerConstants::Initialize(const String& filePath) {
     }
   }
 
+  // Optional: second demon (registered COMP demon as an AI ally)
+  sConstants.SUB_DEMON_ENABLED = 0;
+  if (constants.find("SUB_DEMON_ENABLED") != constants.end()) {
+    success &= LoadInteger(constants["SUB_DEMON_ENABLED"],
+                           sConstants.SUB_DEMON_ENABLED);
+  }
+
+  sConstants.SKILL_SUB_DEMON = 0;
+  if (constants.find("SKILL_SUB_DEMON") != constants.end()) {
+    success &=
+        LoadInteger(constants["SKILL_SUB_DEMON"], sConstants.SKILL_SUB_DEMON);
+  }
+
+  // Optional: minions (data/minions.xml)
+  sConstants.MINION_ENABLED = 0;
+  if (constants.find("MINION_ENABLED") != constants.end()) {
+    success &=
+        LoadInteger(constants["MINION_ENABLED"], sConstants.MINION_ENABLED);
+  }
+
+  sConstants.SKILL_MINION = 0;
+  if (constants.find("SKILL_MINION") != constants.end()) {
+    success &= LoadInteger(constants["SKILL_MINION"], sConstants.SKILL_MINION);
+  }
+
+  sConstants.SUB_MINION_TOGETHER = 0;
+  if (constants.find("SUB_MINION_TOGETHER") != constants.end()) {
+    success &= LoadInteger(constants["SUB_MINION_TOGETHER"],
+                           sConstants.SUB_MINION_TOGETHER);
+  }
+
   // Load other constants
   success &= LoadInteger(constants["DIGITALIZE_COOLDOWN"],
                          sConstants.DIGITALIZE_COOLDOWN);

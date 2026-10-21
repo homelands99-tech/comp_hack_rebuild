@@ -179,5 +179,8 @@ bool Parsers::DemonBoxMove::Parse(
 
   server->GetWorldDatabase()->QueueChangeSet(dbChanges);
 
+  // A second demon moved out of the COMP goes back
+  characterManager->CheckSubDemonInCOMP(client);
+
   return true;
 }

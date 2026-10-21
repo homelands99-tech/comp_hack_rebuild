@@ -882,6 +882,22 @@ bool ZoneManager::EnterZone(
 
   server->GetManagerConnection()->GetWorldConnection()->SendPacket(request);
 
+  // The second demon comes back a moment after entering the zone (auto)
+  if (SVR_CONST.SUB_DEMON_ENABLED) {
+    server->ScheduleWork(
+        (channel::ServerTime)(ChannelServer::GetServerTime() + 2000000ULL),
+        [](CharacterManager* pManager,
+           std::shared_ptr<ChannelClientConnection> pClient,
+           uint32_t pZoneID) {
+          auto pZone =
+              pClient->GetClientState()->GetCharacterState()->GetZone();
+          if (pZone && pZone->GetDefinitionID() == pZoneID) {
+            pManager->AutoSummonSubDemon(pClient);
+          }
+        },
+        server->GetCharacterManager(), client, zoneID);
+  }
+
   return true;
 }
 
@@ -895,6 +911,10 @@ void ZoneManager::LeaveZone(
   auto cState = state->GetCharacterState();
   auto dState = state->GetDemonState();
   auto worldCID = state->GetWorldCID();
+
+  // The second demon (prototype) stays with the character only in one zone
+  characterManager->DismissSubDemon(client);
+  characterManager->DismissMinion(client);
 
   // Cancel any active skills
   for (auto eState : {std::dynamic_pointer_cast<ActiveEntityState>(cState),

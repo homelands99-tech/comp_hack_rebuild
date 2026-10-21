@@ -317,6 +317,38 @@ class AIManager {
   bool Follow(const std::shared_ptr<ActiveEntityState>& eState, uint64_t now);
 
   /**
+   * Out of combat movement of a companion (second demon / minion): walk
+   * with the owner like a partner demon (behind it at its speed, faster
+   * when left behind) instead of catching up and waiting.
+   * @param eState Pointer to the companion
+   * @param now Current timestamp of the server
+   * @return 0 nothing done, 1 the companion moved (send it), 2 a move
+   *  command was queued
+   */
+  int8_t CompanionFollow(const std::shared_ptr<ActiveEntityState>& eState,
+                         uint64_t now);
+
+  /**
+   * For a companion (a player's second demon): queue a heal skill on the
+   * owner when its HP is low, or a support skill on it during combat.
+   * @param eState Pointer to the companion entity state
+   * @param now Current server time
+   * @return true if a skill was queued
+   */
+  bool PrepareCompanionSkill(const std::shared_ptr<ActiveEntityState>& eState,
+                             uint64_t now);
+
+  /**
+   * For a companion: execute a charged skill aimed at the owner once in
+   * range (moving closer first), or drop it if it takes too long.
+   * @param eState Pointer to the companion entity state
+   * @param now Current server time
+   * @return true if the companion is busy with such a skill
+   */
+  bool UpdateCompanionSkill(const std::shared_ptr<ActiveEntityState>& eState,
+                            uint64_t now);
+
+  /**
    * Set the entity's destination position based on the supplied
    * values and uses the current position values to set the origin.
    * Communicating that the move has taken place must be done elsewhere.

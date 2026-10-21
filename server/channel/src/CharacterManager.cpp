@@ -58,6 +58,8 @@
 #include <DemonQuest.h>
 #include <DigitalizeState.h>
 #include <DropSet.h>
+#include <EnemyBase.h>
+#include <EnemyExtension.h>
 #include <EnchantSpecialData.h>
 #include <EventCounter.h>
 #include <Expertise.h>
@@ -103,6 +105,7 @@
 #include <MiSpotData.h>
 #include <MiStatusData.h>
 #include <MiUnionData.h>
+#include <MinionData.h>
 #include <MiUseRestrictionsData.h>
 #include <PentalphaEntry.h>
 #include <PlayerExchangeSession.h>
@@ -116,7 +119,9 @@
 #include <WorldSharedConfig.h>
 
 // channel Includes
+#include "AIManager.h"
 #include "AIState.h"
+#include "AllyState.h"
 #include "ActionManager.h"
 #include "ChannelServer.h"
 #include "ChatManager.h"
@@ -146,7 +151,8 @@ BaseScriptEngine& BaseScriptEngine::Using<CharacterManager>() {
             "DoMitamaReunion", &CharacterManager::DoMitamaReunion)
         .Func("GetMitamaReunionDetails",
               &CharacterManager::GetMitamaReunionDetails)
-        .Func("ReunionBulk", &CharacterManager::ReunionBulk);
+        .Func("ReunionBulk", &CharacterManager::ReunionBulk)
+        .Func("RegisterSubDemon", &CharacterManager::RegisterSubDemon);
 
     Bind<CharacterManager>("CharacterManager", binding);
   }
@@ -1367,6 +1373,976 @@ void CharacterManager::SendAutoRecovery(
   }
 }
 
+/**
+ * Refresh one demon's slot in the client's COMP window.
+ * @param manager Character manager
+ * @param client Pointer to the client connection
+ * @param demon Demon in the COMP
+ */
+static void SendCompSlot(
+    CharacterManager* manager,
+    const std::shared_ptr<channel::ChannelClientConnection>& client,
+    const std::shared_ptr<objects::Demon>& demon) {
+  auto character = client->GetClientState()->GetCharacterState()->GetEntity();
+  auto comp = character ? character->GetCOMP().Get() : nullptr;
+  if (!comp || !demon) {
+    return;
+  }
+
+  for (size_t i = 0; i < comp->DemonsCount(); i++) {
+    if (comp->GetDemons(i).Get() == demon) {
+      manager->SendDemonBoxData(client, 0, {(int8_t)i});
+      break;
+    }
+  }
+}
+
+void CharacterManager::MarkSubDemonDead(
+    const std::shared_ptr<channel::ChannelClientConnection>& client,
+    int32_t entityID) {
+  auto state = client->GetClientState();
+  if (!entityID || state->GetSubDemonEntityID() != entityID) {
+    return;
+  }
+
+  auto demon = std::dynamic_pointer_cast<objects::Demon>(
+      libcomp::PersistentObject::GetObjectByUUID(
+          state->GetObjectUUID(state->GetSubDemonID())));
+  auto ds = demon ? demon->GetCoreStats().Get() : nullptr;
+  if (!ds) {
+    return;
+  }
+
+  ds->SetHP(0);
+  mServer.lock()->GetWorldDatabase()->QueueUpdate(ds, state->GetAccountUID());
+  SendCompSlot(this, client, demon);
+}
+
+// The second demon moves this much faster than normal
+#define SUB_DEMON_MOVE_RATE (1.5f)
+
+// AI script of the second demon (define: script.Name)
+#define SUB_DEMON_AI_SCRIPT "subDemon"
+
+int8_t CharacterManager::RegisterSubDemon(
+    const std::shared_ptr<CharacterState>& cState, int8_t mode) {
+  auto character = cState ? cState->GetEntity() : nullptr;
+  if (!character) {
+    return -3;
+  }
+
+  if (!SVR_CONST.SUB_DEMON_ENABLED) {
+    return -1;
+  }
+
+  auto server = mServer.lock();
+  auto client = server->GetManagerConnection()->GetEntityClient(
+      cState->GetEntityID(), false);
+  auto state = client ? client->GetClientState() : nullptr;
+
+  if (mode == 2) {
+    return character->GetSubDemon().Get() ? 1 : 0;
+  }
+
+  if (mode == 5) {
+    return character->GetSubDemonAuto() ? 1 : 0;
+  }
+
+  if (mode == 3 || mode == 4) {
+    character->SetSubDemonAuto(mode == 3);
+    server->GetWorldDatabase()->QueueUpdate(
+        character, state ? state->GetAccountUID() : character->GetAccount());
+    return mode == 3 ? 1 : 0;
+  }
+
+  std::shared_ptr<objects::Demon> demon;
+  if (mode == 0) {
+    demon = state ? state->GetDemonState()->GetEntity() : nullptr;
+    if (!demon) {
+      return -2;
+    }
+  }
+
+  // A different demon replaces the one that is out
+  if (client) {
+    DismissSubDemon(client);
+  }
+
+  if (mode == 1 && !character->GetSubDemon().Get()) {
+    return 0;
+  }
+
+  if (demon) {
+    character->SetSubDemon(demon);
+  } else {
+    character->SetSubDemon(NULLUUID);
+  }
+
+  server->GetWorldDatabase()->QueueUpdate(
+      character, state ? state->GetAccountUID() : character->GetAccount());
+
+  return 1;
+}
+
+bool CharacterManager::ToggleSubDemon(
+    const std::shared_ptr<channel::ChannelClientConnection>& client,
+    libcomp::String& message) {
+  if (!SVR_CONST.SUB_DEMON_ENABLED) {
+    message = mServer.lock()->GetCustomMessage("SUB_DEMON_DISABLED", "2 体目は使えません。");
+    return false;
+  }
+
+  auto state = client->GetClientState();
+  if (state->GetSubDemonEntityID()) {
+    DismissSubDemon(client);
+    message = mServer.lock()->GetCustomMessage("SUB_DEMON_RETURNED", "2 体目を戻しました。");
+    return true;
+  }
+
+  auto character = state->GetCharacterState()->GetEntity();
+  auto demon = character ? character->GetSubDemon().Get() : nullptr;
+  if (!demon) {
+    message = mServer.lock()->GetCustomMessage("SUB_DEMON_NOT_REGISTERED", "2 体目に登録した仲魔がいません。");
+    return false;
+  }
+
+  auto comp = character->GetCOMP().Get();
+  for (size_t i = 0; comp && i < comp->DemonsCount(); i++) {
+    if (comp->GetDemons(i).Get() == demon) {
+      if (!SummonSubDemon(client, i, message)) {
+        return false;
+      }
+
+      message = mServer.lock()->GetCustomMessage("SUB_DEMON_SUMMONED", "2 体目を呼び出しました。");
+      return true;
+    }
+  }
+
+  message = mServer.lock()->GetCustomMessage("SUB_DEMON_NOT_IN_COMP", "2 体目に登録した仲魔が COMP にいません。");
+  return false;
+}
+
+void CharacterManager::AutoSummonSubDemon(
+    const std::shared_ptr<channel::ChannelClientConnection>& client) {
+  auto state = client->GetClientState();
+  auto character = state->GetCharacterState()->GetEntity();
+  auto dState = state->GetDemonState();
+  if (!SVR_CONST.SUB_DEMON_ENABLED || !character ||
+      !character->GetSubDemonAuto() || state->GetSubDemonEntityID() ||
+      !dState->GetEntity() || !state->GetCharacterState()->GetZone()) {
+    return;
+  }
+
+  auto demon = character->GetSubDemon().Get();
+  if (!demon || demon == dState->GetEntity()) {
+    return;
+  }
+
+  libcomp::String message;
+  if (ToggleSubDemon(client, message)) {
+    mServer.lock()->GetChatManager()->SendChatMessage(
+        client, ChatType_t::CHAT_SELF,
+        mServer.lock()->GetCustomMessage("SUB_DEMON_AUTO_SUMMONED", "2 体目を自動で呼び出しました。"));
+  }
+}
+
+void CharacterManager::CheckSubDemonInCOMP(
+    const std::shared_ptr<channel::ChannelClientConnection>& client) {
+  auto state = client->GetClientState();
+  if (!state->GetSubDemonEntityID()) {
+    return;
+  }
+
+  auto demon = std::dynamic_pointer_cast<objects::Demon>(
+      libcomp::PersistentObject::GetObjectByUUID(
+          state->GetObjectUUID(state->GetSubDemonID())));
+  auto character = state->GetCharacterState()->GetEntity();
+  auto comp = character ? character->GetCOMP().Get() : nullptr;
+  bool inComp = false;
+  for (size_t i = 0; demon && comp && i < comp->DemonsCount(); i++) {
+    if (comp->GetDemons(i).Get() == demon) {
+      inComp = true;
+      break;
+    }
+  }
+
+  if (!inComp) {
+    DismissSubDemon(client);
+  }
+}
+
+bool CharacterManager::SummonSubDemon(
+    const std::shared_ptr<channel::ChannelClientConnection>& client,
+    size_t slot, libcomp::String& error) {
+  auto state = client->GetClientState();
+  auto cState = state->GetCharacterState();
+  auto character = cState->GetEntity();
+  auto zone = cState->GetZone();
+  auto comp = character ? character->GetCOMP().Get() : nullptr;
+  if (!SVR_CONST.SUB_DEMON_ENABLED) {
+    // Also covers the GM command so the feature stays off without the
+    // constant
+    error = mServer.lock()->GetCustomMessage("SUB_DEMON_DISABLED",
+                                             "2 体目は使えません。");
+    return false;
+  }
+
+  if (!zone || !comp) {
+    error = mServer.lock()->GetCustomMessage("SUB_DEMON_NO_ZONE", "ゾーンか COMP が見つかりません。");
+    return false;
+  }
+
+  if (slot >= comp->DemonsCount()) {
+    error = mServer.lock()->GetCustomMessage("SUB_DEMON_BAD_SLOT", "COMP の番号が範囲の外です。");
+    return false;
+  }
+
+  auto demon = comp->GetDemons(slot).Get();
+  if (!demon) {
+    error = mServer.lock()->GetCustomMessage("SUB_DEMON_EMPTY_SLOT", "その番号の COMP は空です。");
+    return false;
+  }
+
+  if (state->GetDemonState()->GetEntity() == demon) {
+    error = mServer.lock()->GetCustomMessage("SUB_DEMON_IS_PARTNER", "召喚中の仲魔は 2 体目にできません。");
+    return false;
+  }
+
+  auto ds = demon->GetCoreStats().Get();
+  if (!ds || ds->GetHP() <= 0) {
+    error = mServer.lock()->GetCustomMessage("SUB_DEMON_DEAD", "その仲魔は戦えない状態です（HP 0）。");
+    return false;
+  }
+
+  DismissSubDemon(client);
+  if (!SVR_CONST.SUB_MINION_TOGETHER) {
+    DismissMinion(client);
+  }
+
+  auto server = mServer.lock();
+  auto zoneManager = server->GetZoneManager();
+  auto definitionManager = server->GetDefinitionManager();
+
+  // Appear a little behind the character
+  cState->RefreshCurrentPosition(ChannelServer::GetServerTime());
+  float rot = cState->GetCurrentRotation();
+  float x = cState->GetCurrentX() - 150.f * (float)cos(rot);
+  float y = cState->GetCurrentY() - 150.f * (float)sin(rot);
+
+  auto eState = zoneManager->CreateAlly(zone, demon->GetType(), 0, x, y, rot);
+  if (!eState) {
+    error = mServer.lock()->GetCustomMessage("SUB_DEMON_CREATE_FAILED", "味方 NPC を作れませんでした。");
+    return false;
+  }
+
+  // The second demon's own AI script (scripts/AI/ai_subdemon.nut) holds its
+  // behaviour settings. Without it the defaults are used (checked first so
+  // a missing script does not log an error on every summon).
+  auto aiManager = server->GetAIManager();
+  bool hasScript =
+      server->GetServerDataManager()->GetAIScript(SUB_DEMON_AI_SCRIPT) !=
+      nullptr;
+  if (!hasScript || !aiManager->Prepare(eState, SUB_DEMON_AI_SCRIPT)) {
+    if (!hasScript) {
+      LogGeneralDebugMsg("Second demon AI script 'subDemon' not found, using"
+                         " the default settings\n");
+      aiManager->Prepare(eState, "");
+    } else {
+      LogGeneralWarningMsg("Second demon AI script 'subDemon' failed to"
+                           " prepare, using the default settings\n");
+    }
+
+    if (eState->GetAIState()) {
+      // Companion logic only, no species script
+      eState->GetAIState()->ClearActionOverrides();
+      eState->GetAIState()->SetScript(nullptr);
+    }
+  }
+
+  auto subParam = [&](const char* key, float def) {
+    auto ai = eState->GetAIState();
+    if (ai && ai->ActionOverridesKeyExists(key)) {
+      bool ok = false;
+      float v = ai->GetActionOverrides(key).ToDecimal<float>(&ok);
+      if (ok) {
+        return v;
+      }
+    }
+
+    return def;
+  };
+
+  // Use the demon's learned skills (and the species traits) instead of the
+  // species' enemy skill list
+  auto devilData = definitionManager->GetDevilData(demon->GetType());
+  auto extension = std::make_shared<objects::EnemyExtension>();
+  extension->SetNoDefaultSkills(true);
+  for (uint32_t skillID : demon->GetLearnedSkills()) {
+    if (skillID) {
+      extension->InsertAddedSkills(skillID);
+    }
+  }
+
+  // Fully inherited skills (also what @skill ID demon grants)
+  for (auto iSkill : demon->GetInheritedSkills()) {
+    if (!iSkill.IsNull() && iSkill->GetSkill() &&
+        iSkill->GetProgress() >= MAX_INHERIT_SKILL) {
+      extension->InsertAddedSkills(iSkill->GetSkill());
+    }
+  }
+
+  for (uint32_t traitID : devilData->GetGrowth()->GetTraits()) {
+    if (traitID) {
+      extension->InsertAddedSkills(traitID);
+    }
+  }
+
+  // Species correction table with the demon's base stats, and a faster
+  // movement speed so the second demon can keep up
+  auto battleData = devilData->GetBattleData();
+  extension->SetOverrideStats(true);
+  for (size_t i = 0; i < 126; i++) {
+    extension->SetCorrectTbl(i, (int16_t)battleData->GetCorrect(i));
+  }
+
+  extension->SetCorrectTbl((size_t)CorrectTbl::STR, ds->GetSTR());
+  extension->SetCorrectTbl((size_t)CorrectTbl::MAGIC, ds->GetMAGIC());
+  extension->SetCorrectTbl((size_t)CorrectTbl::VIT, ds->GetVIT());
+  extension->SetCorrectTbl((size_t)CorrectTbl::INT, ds->GetINTEL());
+  extension->SetCorrectTbl((size_t)CorrectTbl::SPEED, ds->GetSPEED());
+  extension->SetCorrectTbl((size_t)CorrectTbl::LUCK, ds->GetLUCK());
+  for (auto move : {CorrectTbl::MOVE1, CorrectTbl::MOVE2}) {
+    extension->SetCorrectTbl(
+        (size_t)move,
+        (int16_t)(battleData->GetCorrect((size_t)move) *
+                  subParam("MoveRate", SUB_DEMON_MOVE_RATE)));
+  }
+
+  eState->GetEnemyBase()->SetExtension(extension);
+
+  // Copy the demon's level and base stats
+  auto stats = eState->GetCoreStats();
+  stats->SetLevel(ds->GetLevel());
+  stats->SetSTR(ds->GetSTR());
+  stats->SetMAGIC(ds->GetMAGIC());
+  stats->SetVIT(ds->GetVIT());
+  stats->SetINTEL(ds->GetINTEL());
+  stats->SetSPEED(ds->GetSPEED());
+  stats->SetLUCK(ds->GetLUCK());
+  eState->RecalculateStats(definitionManager);
+
+  // Start with the same HP/MP ratio as the demon in the COMP
+  auto ratio = [](int32_t cur, int32_t max) {
+    return max > 0 ? std::min(1.0, std::max(0.0, (double)cur / (double)max))
+                   : 1.0;
+  };
+  stats->SetHP(std::max(1, (int32_t)std::round(
+                               eState->GetMaxHP() *
+                               ratio(ds->GetHP(), ds->GetMaxHP()))));
+  stats->SetMP((int32_t)std::round(eState->GetMaxMP() *
+                                   ratio(ds->GetMP(), ds->GetMaxMP())));
+
+  std::list<std::shared_ptr<ActiveEntityState>> eStates = {eState};
+  std::list<std::shared_ptr<objects::Action>> noActions;
+  // Appear with the partner demon summon graphic (2)
+  if (!zoneManager->AddEnemiesToZone(eStates, zone, false, false, noActions,
+                                     2)) {
+    error = mServer.lock()->GetCustomMessage("SUB_DEMON_ADD_FAILED", "味方 NPC をゾーンに出せませんでした。");
+    return false;
+  }
+
+  // Follow the character and help with its opponents (AI "companion")
+  auto aiState = eState->GetAIState();
+  if (aiState) {
+    aiState->SetFollowEntityID(cState->GetEntityID());
+    aiState->SetDespawnWhenLost(false);
+    aiState->SetCompanion(true);
+    aiState->SetStatus(AIStatus_t::WANDERING, true);
+
+    // Attack as soon as it has a target (the species' AI may only fight
+    // back) and pick skills by the normal logic
+    aiState->SetStrikeFirst(true);
+
+    // Think faster and wait less than the species' default AI
+    aiState->SetThinkSpeed((int32_t)subParam("ThinkSpeed", 1000.f));
+    aiState->SetAggression(subParam("Aggression", 3.f));
+
+    // The species' AI script is not used (Prepare above used the second
+    // demon's script); its settings stay in the action overrides.
+    aiState->SetNormalSkillUse(true);
+  }
+
+  state->SetSubDemonEntityID(eState->GetEntityID());
+  state->SetSubDemonID(state->GetObjectID(demon->GetUUID()));
+
+  return true;
+}
+
+bool CharacterManager::DismissSubDemon(
+    const std::shared_ptr<channel::ChannelClientConnection>& client,
+    int32_t onlyEntityID) {
+  auto state = client->GetClientState();
+  int32_t entityID = state->GetSubDemonEntityID();
+  if (!entityID || (onlyEntityID && entityID != onlyEntityID)) {
+    return false;
+  }
+
+  auto demon = std::dynamic_pointer_cast<objects::Demon>(
+      libcomp::PersistentObject::GetObjectByUUID(
+          state->GetObjectUUID(state->GetSubDemonID())));
+  state->SetSubDemonEntityID(0);
+  state->SetSubDemonID(0);
+
+  auto zone = state->GetCharacterState()->GetZone();
+  auto ally = zone ? zone->GetActiveEntity(entityID) : nullptr;
+
+  // Write the HP/MP ratio back to the demon in the COMP (0 if it died)
+  auto ds = demon ? demon->GetCoreStats().Get() : nullptr;
+  if (ally && ds) {
+    auto acs = ally->GetCoreStats();
+    int32_t hp = 0, mp = 0;
+    if (ally->IsAlive() && ally->GetMaxHP() > 0) {
+      hp = std::max(1, (int32_t)std::round((double)ds->GetMaxHP() *
+                                           (double)acs->GetHP() /
+                                           (double)ally->GetMaxHP()));
+    }
+
+    if (ally->GetMaxMP() > 0) {
+      mp = (int32_t)std::round((double)ds->GetMaxMP() * (double)acs->GetMP() /
+                               (double)ally->GetMaxMP());
+    }
+
+    ds->SetHP(std::min(hp, (int32_t)ds->GetMaxHP()));
+    ds->SetMP(std::min(mp, (int32_t)ds->GetMaxMP()));
+    mServer.lock()->GetWorldDatabase()->QueueUpdate(ds, state->GetAccountUID());
+    SendCompSlot(this, client, demon);
+  }
+
+  if (ally) {
+    zone->RemoveEntity(entityID);
+    // Same removal as storing the partner demon (2)
+    mServer.lock()->GetZoneManager()->RemoveEntitiesFromZone(zone, {entityID},
+                                                             2);
+  }
+
+  return true;
+}
+
+void CharacterManager::GrantSubDemonXP(
+    const std::shared_ptr<channel::ChannelClientConnection>& client,
+    int64_t xp) {
+  auto state = client->GetClientState();
+  int32_t entityID = state->GetSubDemonEntityID();
+  auto zone = state->GetCharacterState()->GetZone();
+  auto ally = (entityID && zone) ? zone->GetActiveEntity(entityID) : nullptr;
+  if (!state->GetSubDemonXP() || !ally || !ally->IsAlive() || xp <= 0) {
+    return;
+  }
+
+  auto demon = std::dynamic_pointer_cast<objects::Demon>(
+      libcomp::PersistentObject::GetObjectByUUID(
+          state->GetObjectUUID(state->GetSubDemonID())));
+  auto ds = demon ? demon->GetCoreStats().Get() : nullptr;
+  if (!ds) {
+    return;
+  }
+
+  // Demons use the world level cap (99 at most)
+  int8_t cap = mServer.lock()->GetWorldSharedConfig()->GetLevelCap();
+  int8_t level = ds->GetLevel();
+  if (level >= cap) {
+    return;
+  }
+
+  int64_t current = ds->GetXP() + xp;
+  while (level < cap &&
+         current >= (int64_t)libhack::LEVEL_XP_REQUIREMENTS[(size_t)level]) {
+    current -= (int64_t)libhack::LEVEL_XP_REQUIREMENTS[(size_t)level++];
+  }
+
+  if (level == cap) {
+    current = 0;
+  }
+
+  ds->SetXP(current);
+
+  auto server = mServer.lock();
+  if (level > ds->GetLevel()) {
+    ds->SetLevel(level);
+    CalculateDemonBaseStats(demon, nullptr, nullptr, false);
+
+    // The ally keeps fighting with the new level
+    auto acs = ally->GetCoreStats();
+    acs->SetLevel(level);
+    acs->SetSTR(ds->GetSTR());
+    acs->SetMAGIC(ds->GetMAGIC());
+    acs->SetVIT(ds->GetVIT());
+    acs->SetINTEL(ds->GetINTEL());
+    acs->SetSPEED(ds->GetSPEED());
+    acs->SetLUCK(ds->GetLUCK());
+
+    auto extension = ally->GetEnemyBase()
+                         ? ally->GetEnemyBase()->GetExtension()
+                         : nullptr;
+    if (extension && extension->GetOverrideStats()) {
+      extension->SetCorrectTbl((size_t)CorrectTbl::STR, ds->GetSTR());
+      extension->SetCorrectTbl((size_t)CorrectTbl::MAGIC, ds->GetMAGIC());
+      extension->SetCorrectTbl((size_t)CorrectTbl::VIT, ds->GetVIT());
+      extension->SetCorrectTbl((size_t)CorrectTbl::INT, ds->GetINTEL());
+      extension->SetCorrectTbl((size_t)CorrectTbl::SPEED, ds->GetSPEED());
+      extension->SetCorrectTbl((size_t)CorrectTbl::LUCK, ds->GetLUCK());
+    }
+    ally->RecalculateStats(server->GetDefinitionManager());
+
+    auto def = server->GetDefinitionManager()->GetDevilData(demon->GetType());
+    server->GetChatManager()->SendChatMessage(
+        client, ChatType_t::CHAT_SELF,
+        server->GetCustomMessage("SUB_DEMON_LEVEL_UP", "2 体目の %1 が Lv%2 になりました。")
+            .Arg(def ? def->GetBasic()->GetName() : libcomp::String("?"))
+            .Arg((int32_t)level));
+  }
+
+  server->GetWorldDatabase()->QueueUpdate(ds, state->GetAccountUID());
+}
+
+// Minion aura statuses reach this far when the minion does not follow
+#define MINION_AURA_RANGE (1500.f)
+
+bool CharacterManager::SummonMinion(
+    const std::shared_ptr<channel::ChannelClientConnection>& client,
+    uint32_t minionID, libcomp::String& message) {
+  if (!SVR_CONST.MINION_ENABLED) {
+    message = mServer.lock()->GetCustomMessage("MINION_DISABLED", "ミニオンは使えません。");
+    return false;
+  }
+
+  auto server = mServer.lock();
+  auto def = server->GetServerDataManager()->GetMinionData(minionID);
+  if (!def) {
+    message = server->GetCustomMessage("MINION_NO_TYPE", "ミニオンの型 %1 がありません。")
+                  .Arg(minionID);
+    return false;
+  }
+
+  auto state = client->GetClientState();
+  if (state->GetMinionEntityID() && state->GetMinionType() == minionID) {
+    DismissMinion(client);
+    message = mServer.lock()->GetCustomMessage("MINION_RETURNED", "ミニオンを戻しました。");
+    return true;
+  }
+
+  uint64_t now = ChannelServer::GetServerTime();
+  if (state->MinionCooldownsKeyExists(minionID) &&
+      now < state->GetMinionCooldowns(minionID)) {
+    message = server->GetCustomMessage("MINION_COOLDOWN", "このミニオンはあと %1 秒呼べません。")
+                  .Arg((state->GetMinionCooldowns(minionID) - now) / 1000000ULL +
+                       1);
+    return false;
+  }
+
+  auto cState = state->GetCharacterState();
+  auto zone = cState->GetZone();
+  if (!zone || !cState->IsAlive()) {
+    message = mServer.lock()->GetCustomMessage("MINION_CANNOT_NOW", "今はミニオンを呼べません。");
+    return false;
+  }
+
+  auto definitionManager = server->GetDefinitionManager();
+  auto zoneManager = server->GetZoneManager();
+  auto devilData = definitionManager->GetDevilData(def->GetDemonType());
+  if (!devilData) {
+    message = mServer.lock()->GetCustomMessage("MINION_BAD_DEMON", "ミニオンの悪魔の種類が正しくありません。");
+    return false;
+  }
+
+  DismissMinion(client);
+  if (!SVR_CONST.SUB_MINION_TOGETHER) {
+    DismissSubDemon(client);
+  }
+
+  // Appear behind the character (a little to the side of the second demon)
+  cState->RefreshCurrentPosition(now);
+  float rot = cState->GetCurrentRotation();
+  float x = cState->GetCurrentX() - 150.f * (float)cos(rot + 0.7f);
+  float y = cState->GetCurrentY() - 150.f * (float)sin(rot + 0.7f);
+
+  auto eState = zoneManager->CreateAlly(zone, def->GetDemonType(), 0, x, y, rot);
+  if (!eState) {
+    message = mServer.lock()->GetCustomMessage("MINION_CREATE_FAILED", "ミニオンを作れませんでした。");
+    return false;
+  }
+
+  // Behaviour settings from the type's AI script (the second demon's script
+  // when it has none)
+  libcomp::String script =
+      def->GetAIScript().IsEmpty() ? SUB_DEMON_AI_SCRIPT : def->GetAIScript();
+  auto aiManager = server->GetAIManager();
+  bool hasScript =
+      server->GetServerDataManager()->GetAIScript(script) != nullptr;
+  if (!hasScript || !aiManager->Prepare(eState, script)) {
+    if (!hasScript) {
+      LogGeneralDebug([&]() {
+        return libcomp::String(
+                   "Minion %1: AI script '%2' not found, using the defaults\n")
+            .Arg(minionID)
+            .Arg(script);
+      });
+      aiManager->Prepare(eState, "");
+    } else {
+      LogGeneralWarning([&]() {
+        return libcomp::String(
+                   "Minion %1: AI script '%2' failed to prepare, using the"
+                   " defaults\n")
+            .Arg(minionID)
+            .Arg(script);
+      });
+    }
+
+    if (eState->GetAIState()) {
+      // Companion logic only, no species script
+      eState->GetAIState()->ClearActionOverrides();
+      eState->GetAIState()->SetScript(nullptr);
+    }
+  }
+
+  auto aiState = eState->GetAIState();
+  bool support = def->GetKind() == objects::MinionData::Kind_t::SUPPORT;
+  bool aura = support &&
+              def->GetSupportMode() == objects::MinionData::SupportMode_t::AURA;
+  if (aiState) {
+    aiState->SetActionOverrides("Minion", "1");
+    if (support) {
+      aiState->SetActionOverrides("NoAttack", "1");
+    }
+
+    if (!def->GetFollow()) {
+      aiState->SetActionOverrides("Stay", "1");
+    }
+
+    if (def->GetInvincible()) {
+      aiState->SetActionOverrides("Invincible", "1");
+    }
+
+    if (aura) {
+      // The server puts the statuses on instead of skills
+      for (auto key : {"UseHeal", "UseSupport", "UseRevive", "SelfHeal"}) {
+        aiState->SetActionOverrides(key, "0");
+      }
+    }
+  }
+
+  auto param = [&](const char* key, float defValue) {
+    if (aiState && aiState->ActionOverridesKeyExists(key)) {
+      bool ok = false;
+      float v = aiState->GetActionOverrides(key).ToDecimal<float>(&ok);
+      if (ok) {
+        return v;
+      }
+    }
+
+    return defValue;
+  };
+
+  // Level (0 = the character's level, demons go up to 99)
+  int32_t level = def->GetLevel() ? (int32_t)def->GetLevel()
+                                  : (int32_t)cState->GetLevel();
+  level = std::max(1, std::min(99, level));
+  auto stats = eState->GetCoreStats();
+  if (stats->GetLevel() != (int8_t)level) {
+    stats->SetLevel((int8_t)level);
+    CalculateDemonBaseStats(nullptr, stats, devilData);
+  }
+
+  // Skills of the type (else the species' enemy skills) and the movement
+  // speed of a follower
+  auto battleData = devilData->GetBattleData();
+  auto extension = std::make_shared<objects::EnemyExtension>();
+  {
+    // The type's skills, else the species' skills learned by this level
+    // (the enemy skill list lacks heals such as Dia for many demons)
+    auto growth = devilData->GetGrowth();
+    extension->SetNoDefaultSkills(true);
+    if (!def->GetSkills().empty()) {
+      for (uint32_t skillID : def->GetSkills()) {
+        if (skillID) {
+          extension->InsertAddedSkills(skillID);
+        }
+      }
+    } else {
+      for (uint32_t skillID : growth->GetSkills()) {
+        if (skillID) {
+          extension->InsertAddedSkills(skillID);
+        }
+      }
+
+      for (auto acSkill : growth->GetAcquisitionSkills()) {
+        if (acSkill->GetID() && acSkill->GetLevel() <= (uint32_t)level) {
+          extension->InsertAddedSkills(acSkill->GetID());
+        }
+      }
+    }
+
+    for (uint32_t traitID : growth->GetTraits()) {
+      if (traitID) {
+        extension->InsertAddedSkills(traitID);
+      }
+    }
+  }
+
+  extension->SetOverrideStats(true);
+  for (size_t i = 0; i < 126; i++) {
+    extension->SetCorrectTbl(i, (int16_t)battleData->GetCorrect(i));
+  }
+
+  extension->SetCorrectTbl((size_t)CorrectTbl::STR, stats->GetSTR());
+  extension->SetCorrectTbl((size_t)CorrectTbl::MAGIC, stats->GetMAGIC());
+  extension->SetCorrectTbl((size_t)CorrectTbl::VIT, stats->GetVIT());
+  extension->SetCorrectTbl((size_t)CorrectTbl::INT, stats->GetINTEL());
+  extension->SetCorrectTbl((size_t)CorrectTbl::SPEED, stats->GetSPEED());
+  extension->SetCorrectTbl((size_t)CorrectTbl::LUCK, stats->GetLUCK());
+  if (def->GetFollow()) {
+    for (auto move : {CorrectTbl::MOVE1, CorrectTbl::MOVE2}) {
+      extension->SetCorrectTbl(
+          (size_t)move, (int16_t)(battleData->GetCorrect((size_t)move) *
+                                  param("MoveRate", SUB_DEMON_MOVE_RATE)));
+    }
+  }
+
+  eState->GetEnemyBase()->SetExtension(extension);
+  eState->RecalculateStats(definitionManager);
+
+  // Full HP/MP, or the HP left last time
+  stats->SetHP(eState->GetMaxHP());
+  stats->SetMP(eState->GetMaxMP());
+  if (def->GetKeepHP() && state->MinionHPKeyExists(minionID)) {
+    stats->SetHP(std::max(
+        1, (int32_t)((int64_t)eState->GetMaxHP() *
+                     (int64_t)state->GetMinionHP(minionID) / 10000)));
+  }
+
+  std::list<std::shared_ptr<ActiveEntityState>> eStates = {eState};
+  std::list<std::shared_ptr<objects::Action>> noActions;
+  if (!zoneManager->AddEnemiesToZone(eStates, zone, false, false, noActions,
+                                     2)) {
+    message = mServer.lock()->GetCustomMessage("MINION_ADD_FAILED", "ミニオンをゾーンに出せませんでした。");
+    return false;
+  }
+
+  if (aiState) {
+    aiState->SetFollowEntityID(cState->GetEntityID());
+    aiState->SetDespawnWhenLost(false);
+    aiState->SetCompanion(true);
+    aiState->SetStatus(AIStatus_t::WANDERING, true);
+    aiState->SetStrikeFirst(!support);
+    aiState->SetThinkSpeed((int32_t)param("ThinkSpeed", 1000.f));
+    aiState->SetAggression(param("Aggression", 3.f));
+    aiState->SetNormalSkillUse(true);
+  }
+
+  if (def->GetInvincible()) {
+    eState->SetAIIgnored(true);
+  }
+
+  int32_t entityID = eState->GetEntityID();
+  state->SetMinionEntityID(entityID);
+  state->SetMinionType(minionID);
+  if (def->GetCooldown()) {
+    state->SetMinionCooldowns(
+        minionID, now + (uint64_t)def->GetCooldown() * 1000000ULL);
+  }
+
+  if (def->GetDuration()) {
+    server->ScheduleWork(
+        (channel::ServerTime)(now +
+                              (uint64_t)def->GetDuration() * 1000000ULL),
+        [](CharacterManager* pManager,
+           std::shared_ptr<ChannelClientConnection> pClient,
+           int32_t pEntityID) { pManager->MinionTimeUp(pClient, pEntityID); },
+        this, client, entityID);
+  }
+
+  if (aura && !def->GetAuraStatuses().empty()) {
+    server->ScheduleWork(
+        (channel::ServerTime)(now + 1000000ULL),
+        [](CharacterManager* pManager,
+           std::shared_ptr<ChannelClientConnection> pClient,
+           int32_t pEntityID) { pManager->MinionAura(pClient, pEntityID); },
+        this, client, entityID);
+  }
+
+  message = mServer.lock()->GetCustomMessage("MINION_SUMMONED", "ミニオンを呼び出しました。");
+  return true;
+}
+
+bool CharacterManager::DismissMinion(
+    const std::shared_ptr<channel::ChannelClientConnection>& client,
+    int32_t onlyEntityID) {
+  auto state = client->GetClientState();
+  int32_t entityID = state->GetMinionEntityID();
+  if (!entityID || (onlyEntityID && entityID != onlyEntityID)) {
+    return false;
+  }
+
+  uint32_t minionID = state->GetMinionType();
+  state->SetMinionEntityID(0);
+  state->SetMinionType(0);
+
+  auto server = mServer.lock();
+  auto def = server->GetServerDataManager()->GetMinionData(minionID);
+  auto zone = state->GetCharacterState()->GetZone();
+  auto ally = zone ? zone->GetActiveEntity(entityID) : nullptr;
+
+  // Remember the HP left (a killed minion comes back with full HP)
+  if (ally && def && def->GetKeepHP()) {
+    if (ally->IsAlive() && ally->GetMaxHP() > 0) {
+      int64_t ratio = (int64_t)ally->GetCoreStats()->GetHP() * 10000 /
+                      (int64_t)ally->GetMaxHP();
+      state->SetMinionHP(minionID,
+                         (uint16_t)std::max<int64_t>(1, std::min<int64_t>(
+                                                            10000, ratio)));
+    } else {
+      state->RemoveMinionHP(minionID);
+    }
+  }
+
+  if (ally) {
+    zone->RemoveEntity(entityID);
+    server->GetZoneManager()->RemoveEntitiesFromZone(zone, {entityID}, 2);
+  }
+
+  return true;
+}
+
+void CharacterManager::MinionDied(
+    const std::shared_ptr<channel::ChannelClientConnection>& client,
+    int32_t entityID) {
+  auto state = client->GetClientState();
+  if (!entityID || state->GetMinionEntityID() != entityID) {
+    return;
+  }
+
+  auto server = mServer.lock();
+  uint32_t minionID = state->GetMinionType();
+  auto def = server->GetServerDataManager()->GetMinionData(minionID);
+  if (def && def->GetDeathCooldown()) {
+    uint64_t until = ChannelServer::GetServerTime() +
+                     (uint64_t)def->GetDeathCooldown() * 1000000ULL;
+    if (!state->MinionCooldownsKeyExists(minionID) ||
+        state->GetMinionCooldowns(minionID) < until) {
+      state->SetMinionCooldowns(minionID, until);
+    }
+  }
+
+  server->GetChatManager()->SendChatMessage(client, ChatType_t::CHAT_SELF,
+                                            server->GetCustomMessage("MINION_DIED", "ミニオンが倒れました。"));
+}
+
+bool CharacterManager::MinionConsumesItem(
+    const std::shared_ptr<channel::ChannelClientConnection>& client,
+    uint32_t minionID) {
+  if (!SVR_CONST.MINION_ENABLED) {
+    return false;
+  }
+
+  auto def = mServer.lock()->GetServerDataManager()->GetMinionData(minionID);
+  if (!def) {
+    return false;
+  }
+
+  auto state = client->GetClientState();
+  if (state->GetMinionEntityID() && state->GetMinionType() == minionID) {
+    // Returning it
+    return false;
+  }
+
+  if (state->MinionCooldownsKeyExists(minionID) &&
+      ChannelServer::GetServerTime() < state->GetMinionCooldowns(minionID)) {
+    // Will not be summoned
+    return false;
+  }
+
+  return def->GetConsumeItem();
+}
+
+void CharacterManager::MinionAura(
+    const std::shared_ptr<channel::ChannelClientConnection>& client,
+    int32_t entityID) {
+  auto state = client->GetClientState();
+  if (!entityID || state->GetMinionEntityID() != entityID) {
+    return;
+  }
+
+  auto server = mServer.lock();
+  auto def =
+      server->GetServerDataManager()->GetMinionData(state->GetMinionType());
+  auto cState = state->GetCharacterState();
+  auto zone = cState->GetZone();
+  auto ally = zone ? zone->GetActiveEntity(entityID) : nullptr;
+  if (!def || !ally) {
+    return;
+  }
+
+  if (ally->IsAlive()) {
+    auto definitionManager = server->GetDefinitionManager();
+    StatusEffectChanges effects;
+    for (uint32_t statusID : def->GetAuraStatuses()) {
+      if (statusID && definitionManager->GetStatusData(statusID)) {
+        effects[statusID] = StatusEffectChange(statusID, 1, true);
+      }
+    }
+
+    uint64_t now = ChannelServer::GetServerTime();
+    ally->RefreshCurrentPosition(now);
+    std::list<std::shared_ptr<ActiveEntityState>> targets;
+    for (auto eState : {std::dynamic_pointer_cast<ActiveEntityState>(cState),
+                        std::dynamic_pointer_cast<ActiveEntityState>(
+                            state->GetDemonState())}) {
+      if (!eState || !eState->Ready() || !eState->IsAlive() ||
+          eState->GetZone() != zone) {
+        continue;
+      }
+
+      eState->RefreshCurrentPosition(now);
+      if (def->GetFollow() || eState->GetDistance(ally) <= MINION_AURA_RANGE) {
+        targets.push_back(eState);
+      }
+    }
+
+    if (effects.size() > 0 && targets.size() > 0) {
+      std::set<int32_t> entityIDs;
+      for (auto eState : targets) {
+        eState->AddStatusEffects(effects, definitionManager);
+        entityIDs.insert(eState->GetEntityID());
+      }
+
+      server->GetTokuseiManager()->Recalculate(cState, true, entityIDs);
+      for (auto eState : targets) {
+        RecalculateStats(eState, client);
+      }
+    }
+  }
+
+  server->ScheduleWork(
+      (channel::ServerTime)(ChannelServer::GetServerTime() +
+                            (uint64_t)std::max<uint32_t>(
+                                1, def->GetAuraInterval()) *
+                                1000000ULL),
+      [](CharacterManager* pManager,
+         std::shared_ptr<ChannelClientConnection> pClient,
+         int32_t pEntityID) { pManager->MinionAura(pClient, pEntityID); },
+      this, client, entityID);
+}
+
+void CharacterManager::MinionTimeUp(
+    const std::shared_ptr<channel::ChannelClientConnection>& client,
+    int32_t entityID) {
+  if (DismissMinion(client, entityID)) {
+    mServer.lock()->GetChatManager()->SendChatMessage(
+        client, ChatType_t::CHAT_SELF,
+        mServer.lock()->GetCustomMessage("MINION_TIME_UP", "ミニオンが帰りました（時間切れ）。"));
+  }
+}
+
 void CharacterManager::SummonDemon(
     const std::shared_ptr<channel::ChannelClientConnection>& client,
     int64_t demonID, bool updatePartyState) {
@@ -1383,6 +2359,10 @@ void CharacterManager::SummonDemon(
           state->GetObjectUUID(demonID)));
   if (!demon || !zone) {
     return;
+  }
+
+  if (state->GetSubDemonEntityID() && state->GetSubDemonID() == demonID) {
+    DismissSubDemon(client);
   }
 
   auto server = mServer.lock();
@@ -1529,6 +2509,8 @@ void CharacterManager::SummonDemon(
     state->GetPartyDemonPacket(request);
     server->GetManagerConnection()->GetWorldConnection()->SendPacket(request);
   }
+
+  AutoSummonSubDemon(client);
 }
 
 void CharacterManager::StoreDemon(
@@ -8543,6 +9525,30 @@ void CharacterManager::DeleteDemon(
   if (box && box->GetDemons((size_t)demon->GetBoxSlot()).Get() == demon) {
     box->SetDemons((size_t)demon->GetBoxSlot(), NULLUUID);
     changes->Update(box);
+
+    // A second demon that is gone: put it away and clear the registration
+    auto owner = std::dynamic_pointer_cast<objects::Character>(
+        libcomp::PersistentObject::GetObjectByUUID(box->GetCharacter()));
+    if (owner && owner->GetSubDemon().GetUUID() == demon->GetUUID()) {
+      auto ownerAccount = std::dynamic_pointer_cast<objects::Account>(
+          libcomp::PersistentObject::GetObjectByUUID(box->GetAccount()));
+      auto ownerClient =
+          ownerAccount
+              ? mServer.lock()->GetManagerConnection()->GetClientConnection(
+                    ownerAccount->GetUsername())
+              : nullptr;
+      if (ownerClient) {
+        auto ownerState = ownerClient->GetClientState();
+        if (ownerState->GetSubDemonEntityID() &&
+            ownerState->GetSubDemonID() ==
+                ownerState->GetObjectID(demon->GetUUID())) {
+          DismissSubDemon(ownerClient);
+        }
+      }
+
+      owner->SetSubDemon(NULLUUID);
+      changes->Update(owner);
+    }
 
     if (demon->GetHasQuest()) {
       // End the demon quest if it belongs to the demon

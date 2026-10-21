@@ -62,6 +62,7 @@ class AILogicGroup;
 class DemonFamiliarityType;
 class CustomMessage;
 class DemonPresent;
+class MinionData;
 class DemonQuestReward;
 class DropSet;
 class Event;
@@ -235,6 +236,20 @@ class ServerDataManager {
    * @return Pointer to the demon present entry matching the specified id
    */
   const std::shared_ptr<objects::DemonPresent> GetDemonPresentData(uint32_t id);
+
+  /**
+   * Get a minion type (data/minions.xml) by ID
+   * @param id Minion type ID
+   * @return Pointer to the minion type or null
+   */
+  const std::shared_ptr<objects::MinionData> GetMinionData(uint32_t id);
+
+  /**
+   * Get all minion types
+   * @return Map of all minion types by ID
+   */
+  std::unordered_map<uint32_t, std::shared_ptr<objects::MinionData>>
+  GetAllMinionData();
 
   /**
    * Get the text of a message added by this fork: the Text of the entry with
@@ -645,6 +660,10 @@ class ServerDataManager {
   /// Map of demon present entries by definition ID
   std::unordered_map<uint32_t, std::shared_ptr<objects::DemonPresent>>
       mDemonPresentData;
+
+  /// Minion types by ID
+  std::unordered_map<uint32_t, std::shared_ptr<objects::MinionData>>
+      mMinionData;
 
   /// Message texts of data/custom_messages.xml by ID
   std::unordered_map<std::string, libcomp::String> mCustomMessages;
